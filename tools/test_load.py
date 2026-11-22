@@ -1,4 +1,4 @@
-"""Smoke test: loads every file in DoesItLive.toc (Lua 5.1, like WoW) with a fake WoW environment, then fires the
+"""Smoke test (the tracking itself: test_tracking.py): loads every file in DoesItLive.toc (Lua 5.1, like WoW) with a fake WoW environment, then fires the
 events and slash commands the probe handles, with plain and with secret values. Catches runtime errors, not
 visual ones. Usage: pip install lupa; python tools/test_load.py"""
 
@@ -83,7 +83,7 @@ function UnitCanAssist(_, u)
 end
 function UnitCanAttack(_, u) return u == "target" end
 function UnitName(u) if u == "player" then return "Joe" elseif u == "party1" then return "Pal" end return "Mob" end
-function UnitGUID() return "Player-1-1" end
+function UnitGUID(u) return "GUID-" .. u end
 function UnitHealth() if secretHealth then return SECRET end return 500 end
 function UnitHealthMax() if secretHealth then return SECRET end return 1000 end
 function UnitGetIncomingHeals() return SECRET end
@@ -107,7 +107,7 @@ C_Spell = { GetSpellName = function(id) return "Rejuvenation" end,
 C_UnitAuras = { GetAuraDataByIndex = function(unit, i, filter)
     if i > 1 then return nil end
     if inCombat then return { name = SECRET, spellId = SECRET, duration = SECRET, expirationTime = SECRET, points = SECRET } end
-    return { name = "Rejuvenation", spellId = 774, duration = 12, expirationTime = 112, sourceUnit = "player", points = { 65 } }
+    return { name = "Mark of the Wild", spellId = 1126, duration = 12, expirationTime = 112, sourceUnit = "player", points = { 65 } }
 end }
 C_Secrets = { ShouldAurasBeSecret = function() return inCombat end }
 C_ChatInfo = { RegisterAddonMessagePrefix = function() return true end, SendAddonMessage = function() return 0 end }
@@ -142,17 +142,26 @@ SlashCmdList = {}
 """
 
 
+def toc_files():
+    toc = open(os.path.join(ROOT, "DoesItLive.toc"), encoding="utf-8").read().splitlines()
+    return [line.strip() for line in toc if line.strip() and not line.startswith("#")]
+
+
+def load_addon(lua):
+    """Loads the .toc's files in order, sharing one addon table like WoW does; returns that table."""
+    ns = lua.eval("{}")
+    load = lua.eval("function(code, name, ns) local fn = assert(loadstring(code, name)); fn('DoesItLive', ns) end")
+    for name in toc_files():
+        load(open(os.path.join(ROOT, name), encoding="utf-8").read(), "@" + name, ns)
+    return ns
+
+
 def main():
     os.environ["LC_ALL"] = "C"
     lua = lupa51.LuaRuntime(unpack_returned_tuples=True)
     lua.execute(FAKE_WOW)
-    toc = open(os.path.join(ROOT, "DoesItLive.toc"), encoding="utf-8").read().splitlines()
-    files = [line.strip() for line in toc if line.strip() and not line.startswith("#")]
-    ns = lua.eval("{}")
-    for name in files:
-        code = open(os.path.join(ROOT, name), encoding="utf-8").read()
-        lua.execute("return function(...) " + code + "\nend")  # syntax check
-        lua.eval("function(code, name, ns) local fn = assert(loadstring(code, name)); fn('DoesItLive', ns) end")(code, name, ns)
+    files = toc_files()
+    load_addon(lua)
 
     script = r"""
     fireEvent("ADDON_LOADED", "DoesItLive")

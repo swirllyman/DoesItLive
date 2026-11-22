@@ -14,8 +14,30 @@ The plan (feasibility, display geometry, tracking, how it stays out of DoesItDie
 
 ## Status
 
-**Probe only.** `DoesItLive/Probe.lua` logs what addon code can read about healing on friendly units, in and out of
-combat. The test heal bar is verified in-game on the player frame, friendly target frame and personal resource display; friendly nameplates are not. The real addon gets built once a probe log is in.
+The bars follow your HoTs (Rejuvenation, Regrowth, Renew, Riptide). Verified in-game: the bars' look on the player
+frame, friendly target frame and personal resource display, with a fixed amount (`/dil bar`). **Not** yet verified
+in-game: the tracking, and friendly nameplates (name-only plates have no bar to draw on:
+`nameplateShowOnlyNameForFriendlyPlayerUnits`). Missing: the remaining heal as text, options, Wild Growth, other
+players' HoTs.
+
+| File | What |
+|---|---|
+| `DoesItLive/Probe.lua` | Log, helpers shared through the addon table (`ns.out`, `ns.isSecret`...), the probe, all events and `/dil`. Loaded first |
+| `DoesItLive/Tracking.lua` | HoTs per unit (kept by GUID, else by name): casts, tooltips, timing, corrections from auras out of combat. `ns.tracking.remaining(unit)` |
+| `DoesItLive/Display.lua` | The bars and which frames they sit on. `ns.display` |
+
+## What the probe found (Forever 1.60.1, druid 35, 2026-11-22)
+
+- Current and missing health, `UnitGetIncomingHeals` and `UNIT_COMBAT` heal amounts are secret in **and out** of
+  combat for the player; max health is readable for yourself (secret for the nameplates seen). So ticks can't be
+  measured, and `HEAL CHECK` (question 5) never runs.
+- `UNIT_COMBAT` heals do fire per tick, with a readable action and flag (`CRITICAL`), also for target and nameplates.
+- Own casts: spell, target name and tooltip are readable in combat. The name includes the surname ("Joe Gg") where
+  `UnitName` returns "Joe", "Gg".
+- Auras and `GetSpellBonusHealing` are readable out of combat only.
+- The damage meter's healing totals are readable after combat, and match the **tooltips**, which already include
+  bonus healing (13 then): don't add it again. Rejuvenation 214: meter 53 for one tick, 215 for four, 241 with a crit
+  (HoTs crit, 1.5x). Regrowth 313-352 + 300: 624.
 
 ## Why it's built the way it is
 
@@ -36,9 +58,9 @@ in math). DoesItDie's CLAUDE.md has the verified table for enemies. The rules th
   scale). Layer above the whole unit frame's highest readable strata/level (rechecked every second) and never below
   MEDIUM/1001 (verified in-game: above LOW/1001, the player frame's whole tree, it didn't show), never the bar's own
   level plus something, and give each of our frames its own level. Blizzard's Forever UI source: the `forever` branch of `Gethe/wow-ui-source`.
-- Estimate HoTs from casts (`UNIT_SPELLCAST_SENT/SUCCEEDED`, target by the sent name) and tooltips
-  (`C_Spell.GetSpellDescription`), plus bonus healing read out of combat (`GetSpellBonusHealing`), corrected by
-  observed `UNIT_COMBAT` `HEAL` ticks (out of combat) and the damage meter's healing totals after combat.
+- Estimate HoTs from casts (`UNIT_SPELLCAST_SENT/SUCCEEDED`, target by the sent name, decided at SENT) and tooltips
+  (`C_Spell.GetSpellDescription`, nothing added), corrected from auras out of combat. Right after a recast the aura
+  list can still hold the old aura: don't move a HoT back on that.
 - Registering `COMBAT_LOG_EVENT_UNFILTERED` is forbidden (blocked action popup).
 - Guard every value that might be secret with `isSecret()` before comparing or indexing with it.
 
@@ -74,7 +96,8 @@ gold or white stripes. Own names everywhere: `/dil`, `DoesItLive*` globals, `Doe
 - **Game install:** `C:\Program Files (x86)\World of Warcraft\_forever_\`. Junction
   `Interface\AddOns\DoesItLive` to this repo's `DoesItLive/` so edits are live (`/reload`; new files need a restart).
 - **Tests:** `pip install lupa`, then `python tools/test_load.py` (loads the .toc in Lua 5.1 with a fake WoW API,
-  fires every event and command with plain and secret values).
+  fires every event and command with plain and secret values) and `python tools/test_tracking.py` (scripted
+  casts, auras and time, and Forever's HoT tooltips from DoesItDie's `tools/data/forever_spellbook.json`).
 - **Releasing:** add notes to `CHANGELOG.md`, push a `v*` tag. Add `## X-Curse-Project-ID:` to the .toc once the
   CurseForge project exists, and the `CF_API_KEY` secret to the repo.
 - **Gotchas** (from DoesItDie): WoW runs Lua 5.1 (`lupa.lua51` in tests). Bash heredocs collapse backslashes, which
