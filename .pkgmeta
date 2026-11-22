@@ -1,0 +1,16 @@
+package-as: DoesItLive
+
+# Uploaded as each release's changelog on CurseForge (instead of the commit list).
+manual-changelog:
+    filename: CHANGELOG.md
+    markup-type: markdown
+
+# The addon lives in a subfolder; lift it to the zip root.
+move-folders:
+    DoesItLive/DoesItLive: DoesItLive
+
+# Dev-only folders stay out of the release zip.
+ignore:
+    - tools
+    - README.md
+    - CLAUDE.md

@@ -1,0 +1,8 @@
+## Interface: 16001
+## Title: DoesItLive
+## Notes: Sister addon to DoesItDie: shows how much your HoTs will still heal and whether they top the target off. Currently a diagnostic probe (/dil).
+## Author: Joe Greive
+## Version: @project-version@
+## SavedVariables: DoesItLiveDB
+
+Probe.lua
