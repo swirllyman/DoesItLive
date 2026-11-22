@@ -5,8 +5,8 @@ A World of Warcraft: **Forever** addon, the sister of **DoesItDie** (`swirllyman
 kills it. DoesItLive is the same for the player's **HoTs** on friendly units:
 
 - a **heal segment** on the unit's health bar, starting where the green ends, covering the healing the HoTs still
-  have to do; the part that hangs past the full bar is **overheal**, drawn in another color;
-- a **tops off icon** at the bar's right end when the HoTs will fill the bar;
+  have to do; **overheal** is drawn in another color over the end of the green (nothing hangs past the bar);
+- a **tops off icon** inside the bar's right end when the HoTs will fill the bar;
 - the remaining heal as text (`+830`).
 
 The plan (feasibility, display geometry, tracking, how it stays out of DoesItDie's way, names) is the Claude Doc
@@ -15,7 +15,7 @@ The plan (feasibility, display geometry, tracking, how it stays out of DoesItDie
 ## Status
 
 **Probe only.** `DoesItLive/Probe.lua` logs what addon code can read about healing on friendly units, in and out of
-combat. Nothing is verified in-game yet. The real addon gets built once a probe log is in.
+combat. The test heal bar is verified in-game on the player frame, friendly target frame and personal resource display; friendly nameplates are not. The real addon gets built once a probe log is in.
 
 ## Why it's built the way it is
 
@@ -24,9 +24,18 @@ in math). DoesItDie's CLAUDE.md has the verified table for enemies. The rules th
 
 - Never compute "does it top off" in Lua. Feed secret values (max health) into `StatusBar` widgets and let the
   geometry answer: a heal bar the health bar's size, `max` = max health, `value` = remaining heal, pinned to the end
-  of the green fill (`healthBar:GetStatusBarTexture()`); a clip frame over the bar shows the effective part, a clip
-  frame past its right end shows the overheal, and an icon riding the fill's end inside a clip window past the end
-  only shows when it tops off.
+  of the green fill (`healthBar:GetStatusBarTexture()`) and clipped to the bar, is the effective part. A
+  reverse-filled bar over the host spans its last `heal`; its overlap with the green is the overheal, drawn as a
+  strip along the bottom so the end of the green stays readable. The icon rides
+  a 10000px fill of `heal` out of `UnitHealthMissing` (from -1, so full health isn't an empty range), which stops at
+  full width once it tops off. Don't chain health + heal bars for the icon: that end keeps moving with overheal and
+  the icon slides out of its window.
+- Forever's player health bar is 20 tall but masked to its 15 tall `HealthBarsContainer`: clip to the container and
+  add its `HealthBarMask` to our textures. The bars under the character are
+  `PersonalResourceDisplayFrame.HealthBarsContainer.healthBar` (Blizzard_PersonalResourceDisplay, with its own
+  scale). Layer above the whole unit frame's highest readable strata/level (rechecked every second) and never below
+  MEDIUM/1001 (verified in-game: above LOW/1001, the player frame's whole tree, it didn't show), never the bar's own
+  level plus something, and give each of our frames its own level. Blizzard's Forever UI source: the `forever` branch of `Gethe/wow-ui-source`.
 - Estimate HoTs from casts (`UNIT_SPELLCAST_SENT/SUCCEEDED`, target by the sent name) and tooltips
   (`C_Spell.GetSpellDescription`), plus bonus healing read out of combat (`GetSpellBonusHealing`), corrected by
   observed `UNIT_COMBAT` `HEAL` ticks (out of combat) and the damage meter's healing totals after combat.
@@ -47,7 +56,7 @@ in math). DoesItDie's CLAUDE.md has the verified table for enemies. The rules th
 | 8 | `UNIT_AURA` payloads on friendly units | `onUnitAura` | `UNIT_AURA` |
 | 9 | Addon messages in combat (HealComm-style sharing)? | `sendTestMessage` | `ADDONMSG` |
 | 10 | Damage meter healing / absorb totals after combat, and the row fields (overheal?) | `readMeter` | `METER` |
-| 11 | Heal bar geometry on the player frame with secret max health | `/dil bar <n>` | `BAR` |
+| 11 | Heal bar geometry on the player frame, personal resource display, friendly target frame and friendly nameplates (`/dil plates`; `PLATE` lines log which plates are reachable, in and out of instances) | `/dil bar <n>` | `BAR` |
 
 Suggested session: a druid or priest in a party. `/dil probe` out of combat, `/dil bar 800` at partial health, cast
 Rejuvenation/Renew on yourself and a party member out of combat (heal check), then a few pulls healing with HoTs.

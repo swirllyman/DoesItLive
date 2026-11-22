@@ -11,11 +11,14 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "DoesItLiv
 
 FAKE_WOW = r"""
 local frames = {}
+allFrames = frames
+UIParent = {}
 local function newObject()
     local o = {}
     setmetatable(o, { __index = function(t, k)
         return function(self, ...)
-            if k == "GetStatusBarTexture" or k == "CreateTexture" or k == "CreateAnimationGroup" or k == "CreateAnimation" then
+            if k == "GetChildren" then return nil
+            elseif k == "GetStatusBarTexture" or k == "CreateTexture" or k == "CreateAnimationGroup" or k == "CreateAnimation" then
                 return newObject()
             elseif k == "GetWidth" or k == "GetHeight" then return 100
             elseif k == "GetFrameLevel" then return 3
@@ -28,6 +31,13 @@ local function newObject()
 end
 function CreateFrame(kind, name, parent)
     local f = newObject()
+    rawset(f, "_parent", parent) rawset(f, "shown", true)
+    rawset(f, "Show", function(self) self.shown = true end)
+    rawset(f, "Hide", function(self) self.shown = false end)
+    rawset(f, "SetShown", function(self, s) self.shown = s and true or false end)
+    rawset(f, "SetFrameLevel", function(self, l) self.level = l end)
+    rawset(f, "SetFrameStrata", function(self, s) self.strata = s end)
+    rawset(f, "SetAllPoints", function(self, to) self.over = to end)
     local scripts = {}
     rawset(f, "SetScript", function(self, what, fn) scripts[what] = fn end)
     rawset(f, "RegisterEvent", function(self, e) end)
@@ -63,15 +73,21 @@ function GetBuildInfo() return "1.60.1", "12345", "", 16001 end
 function UnitClass() return "Druid", "DRUID" end
 function UnitLevel() return 60 end
 function UnitAffectingCombat() return inCombat end
-function UnitExists(u) return u == "player" or u == "target" or u == "party1" end
+function UnitExists(u) return u == "player" or u == "target" or u == "party1" or (plates and plates[u] ~= nil) or u == "nameplate3" end
 function UnitIsUnit(a, b) return a == b end
-function UnitCanAssist(_, u) return u ~= "target" end
+friendlyTarget = false
+function UnitCanAssist(_, u)
+    if friendlyTarget == "secret" then return SECRET end
+    if u == "nameplate2" then return false end
+    return u ~= "target" or friendlyTarget
+end
 function UnitCanAttack(_, u) return u == "target" end
 function UnitName(u) if u == "player" then return "Joe" elseif u == "party1" then return "Pal" end return "Mob" end
 function UnitGUID() return "Player-1-1" end
 function UnitHealth() if secretHealth then return SECRET end return 500 end
 function UnitHealthMax() if secretHealth then return SECRET end return 1000 end
 function UnitGetIncomingHeals() return SECRET end
+function UnitHealthMissing() if secretHealth then return SECRET end return 500 end
 function GetSpellBonusHealing() return 300 end
 function IsInGroup() return true end
 function IsInRaid() return false end
@@ -100,6 +116,28 @@ C_DamageMeter = { GetCombatSessionSourceFromType = function(session, t)
     return { totalAmount = 1234, combatSpells = { { spellID = 774, totalAmount = 1000, overkillAmount = 0 } } }
 end }
 PlayerFrame = { PlayerFrameContent = { PlayerFrameContentMain = { HealthBarsContainer = { HealthBar = CreateFrame("StatusBar") } } } }
+-- The target frame: its own level is secret, a child sits at MEDIUM/1001 (what Forever does).
+local function layered(strata, level, children)
+    return { GetFrameStrata = function() return strata end, GetFrameLevel = function() return level end,
+             GetChildren = function() return unpack(children or {}) end }
+end
+TargetFrame = layered(SECRET, SECRET, { layered("LOW", 5000),
+    setmetatable({}, { __index = function() error("forbidden frame") end }), layered("MEDIUM", 1001) })
+for k, v in pairs({ TargetFrameContent = { TargetFrameContentMain = { HealthBarsContainer = { HealthBar = CreateFrame("StatusBar") } } } }) do TargetFrame[k] = v end
+PersonalResourceDisplayFrame = { HealthBarsContainer = { healthBar = CreateFrame("StatusBar") } }
+for k, v in pairs(layered("LOW", 20)) do PlayerFrame[k] = v end
+for k, v in pairs(layered("LOW", 40)) do PersonalResourceDisplayFrame[k] = v end
+plates = {
+    nameplate1 = { UnitFrame = { healthBar = CreateFrame("StatusBar") }, GetFrameStrata = function() return "LOW" end },
+    nameplate2 = { UnitFrame = { healthBar = CreateFrame("StatusBar") } },
+    nameplate4 = { IsForbidden = function() return true end },
+    nameplate5 = { UnitFrame = {} },
+}
+C_NamePlate = { GetNamePlateForUnit = function(unit, includeForbidden)
+    if unit == "nameplate3" and includeForbidden then return {} end
+    return plates[unit]
+end }
+function IsInInstance() return false, "none" end
 SlashCmdList = {}
 """
 
@@ -119,7 +157,7 @@ def main():
     script = r"""
     fireEvent("ADDON_LOADED", "DoesItLive")
     local cmd = SlashCmdList.DOESITLIVE
-    cmd("") cmd("probe") cmd("bar 800") tick(0.2) cmd("bar") cmd("msg") cmd("meter") cmd("echo") cmd("echo")
+    cmd("") cmd("probe") cmd("bar 800") tick(0.2) tick(1.1) runTimers() cmd("bar") cmd("bar 0") cmd("msg") cmd("meter") cmd("echo") cmd("echo")
     fireEvent("UNIT_SPELLCAST_SENT", "player", "Pal", "cast-1", 774)
     fireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "cast-1", 774)
     fireEvent("UNIT_COMBAT", "party1", "HEAL", "", 65, 8)
@@ -137,7 +175,64 @@ def main():
     fireEvent("UNIT_AURA", "player", SECRET)
     fireEvent("UNIT_SPELLCAST_SUCCEEDED", "party1", "cast-3", SECRET)
     fireEvent("CHAT_MSG_ADDON", SECRET, SECRET, SECRET, SECRET)
+    -- The target's bar follows whether the target is friendly.
+    local targetArea = TargetFrame.TargetFrameContent.TargetFrameContentMain.HealthBarsContainer
+    local function targetRoot()
+        for _, f in ipairs(allFrames) do
+            if f.over == targetArea and f._parent == UIParent then return f end
+        end
+        error("no target widget")
+    end
+    local function targetShown()
+        return targetRoot().shown
+    end
+    cmd("bar 300") assert(targetShown() == false, "shown on an enemy")
+    assert(targetRoot().strata == "MEDIUM" and targetRoot().level > 1001, "not above the target frame")
+    local levels, seen = 0, {}
+    for _, f in ipairs(allFrames) do
+        if rawget(f, "strata") and f.strata ~= "LOW" then
+            assert(f.strata == "MEDIUM" and f.level > 1001, "below the unit frames")
+            seen[f.level] = (seen[f.level] or 0) + 1
+        end
+    end
+    for level, count in pairs(seen) do
+        assert(count == 3, "level " .. level .. " used " .. count .. " times") levels = levels + 1 -- once per widget
+    end
+    assert(levels == 8, "layers: " .. levels)
+    friendlyTarget = true fireEvent("PLAYER_TARGET_CHANGED") assert(targetShown() == true, "hidden on a friend")
+    friendlyTarget = "secret" tick(0.2) assert(targetShown() == false, "shown on an unreadable target")
+    friendlyTarget = true tick(0.2) assert(targetShown() == true, "not shown again")
+    friendlyTarget = false fireEvent("PLAYER_TARGET_CHANGED") assert(targetShown() == false, "still on an enemy")
+    cmd("bar") assert(targetShown() == false, "not hidden by /dil bar")
     cmd("bar 300") tick(0.2) cmd("bar")
+    -- Friendly nameplates: 1 friendly, 2 enemy, 3 hidden by the client, 4 forbidden, 5 without a bar.
+    local function root()
+        for _, f in ipairs(allFrames) do
+            if f._parent == plates.nameplate1 and rawget(f, "over") == plates.nameplate1.UnitFrame.healthBar then return f end
+        end
+    end
+    local function plateRoots(plate)
+        local n = 0
+        for _, f in ipairs(allFrames) do if rawget(f, "_parent") == plate then n = n + 1 end end
+        return n
+    end
+    assert(root() and root().shown == false, "plate drawn while the test bar is off")
+    cmd("bar 300") assert(root() and root().shown == true, "friendly plate not drawn")
+    assert(root().level > 3, "plate bar not above its health bar")
+    assert(plateRoots(plates.nameplate2) == 0, "enemy plate drawn")
+    assert(plateRoots(plates.nameplate4) == 0, "forbidden plate touched")
+    tick(0.2) tick(1.1) runTimers()
+    fireEvent("NAME_PLATE_UNIT_REMOVED", "nameplate1") assert(root().shown == false, "removed plate still drawn")
+    fireEvent("NAME_PLATE_UNIT_ADDED", "nameplate1") assert(root().shown == true, "plate not drawn again")
+    assert(plateRoots(plates.nameplate1) == 1, "plate widget made twice")
+    cmd("plates") assert(root().shown == false, "plates off, still drawn") tick(0.2) assert(root().shown == false)
+    cmd("plates") assert(root().shown == true, "plates on, not drawn")
+    cmd("bar") assert(root().shown == false, "not hidden by /dil bar")
+    fireEvent("NAME_PLATE_UNIT_ADDED", "nameplate1") assert(root().shown == false, "drawn while the test bar is off")
+    local prd = PersonalResourceDisplayFrame
+    PersonalResourceDisplayFrame = nil
+    cmd("bar 300") tick(1.1) tick(1.1) cmd("bar")
+    PersonalResourceDisplayFrame = prd
     runTimers() runTimers()
     inCombat = false secretHealth = false
     fireEvent("PLAYER_REGEN_ENABLED")
@@ -148,7 +243,12 @@ def main():
     lines = lua.execute(script)
     log = lua.eval("DoesItLiveDB.log")
     text = "\n".join(log[i] for i in range(1, len(log) + 1))
-    for needle in ["SNAPSHOT (manual)", "BAR attach", "CAST Rejuvenation", "HEAL CHECK party1", "UNIT_AURA party1",
+    for needle in ["SNAPSHOT (manual)", "BAR attach player to", "BAR attach personal to", "BAR attach target to", "BAR target layer: above MEDIUM/1001", "BAR player layer: above MEDIUM/1001 (found LOW/20", "BAR player iconWindow: ",
+                   "BAR target state: hidden, unit not friendly", "BAR target state: shown",
+                   "PLATE nameplate1 plate ok, bar UnitFrame.healthBar", "PLATE nameplate3 plate not reachable (forbidden)",
+                   "PLATE nameplate4 plate forbidden", "PLATE nameplate5 plate ok, bar not reachable",
+                   "friendly nameplates OFF", "friendly nameplates ON",
+                   "BAR personal health bar not found", "CAST Rejuvenation", "HEAL CHECK party1", "UNIT_AURA party1",
                    "OTHER CAST", "ADDONMSG received", "METER HealingDone", "<secret>", "Left combat"]:
         if needle not in text:
             print(text)
