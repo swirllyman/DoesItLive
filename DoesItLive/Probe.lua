@@ -312,11 +312,17 @@ local function sendTestMessage(why)
         out("ADDONMSG SendAddonMessage missing")
         return
     end
-    local channel, target = "WHISPER", UnitName("player")
-    if IsInRaid and IsInRaid() then channel, target = "RAID", nil
-    elseif IsInGroup and IsInGroup() then channel, target = "PARTY", nil end
+    -- Group channels only. A whisper to yourself goes to UnitName("player"), which on Forever leaves out the
+    -- surname ("Joe" for "Joe Gg"), so the server printed "No player named 'Joe' is currently playing." on every pull.
+    local channel
+    if IsInRaid and IsInRaid() then channel = "RAID"
+    elseif IsInGroup and IsInGroup() then channel = "PARTY" end
+    if not channel then
+        out("ADDONMSG " .. why .. ": not in a group, nothing sent")
+        return
+    end
     local text = string.format("probe %s combat=%s t=%.1f", why, tostring(inCombat()), GetTime())
-    local ok, result = pcall(C_ChatInfo.SendAddonMessage, PREFIX, text, channel, target)
+    local ok, result = pcall(C_ChatInfo.SendAddonMessage, PREFIX, text, channel)
     out(string.format("ADDONMSG send %s via %s: %s", why, channel, ok and ("result=" .. probe(result)) or ("ERROR " .. tostring(result))))
 end
 
