@@ -9,11 +9,14 @@
 local _, ns = ...
 
 local WHITE = "Interface\\Buttons\\WHITE8X8"
-local WINDOW_WIDTH, WINDOW_HEIGHT = 840, 500
+local WINDOW_WIDTH, WINDOW_HEIGHT = 920, 500
 local HEADER_HEIGHT = 52
 local PREVIEW_WIDTH = 270
 local ROW_HEIGHT = 26
 local SETTINGS_LAYOUT = { label = 170, control = 190 }
+local CHECK_LAYOUT = { label = 210, control = 26 } -- the two-column lists
+local COLOR_LAYOUT = { label = 130, control = 130 }
+local COLUMN_WIDTH = 300
 local PREVIEW_LAYOUT = { label = 92, control = 130 }
 local DISABLED_ALPHA = 0.35
 local SIMULATION_STEP = 0.5 -- seconds; one HoT tick per step
@@ -22,7 +25,6 @@ local SIMULATION_STEP = 0.5 -- seconds; one HoT tick per step
 local PRESETS = {
     { id = "default", label = "Default", values = { -- the same as ns.DEFAULTS' look
         healColor = "teal", healOpacity = 25, fillTexture = "flat", hotColors = "bySpell", segmentDividers = true,
-        colorRejuvenation = "teal", colorRegrowth = "green", colorRenew = "cyan", colorRiptide = "blue",
         outlineStyle = "dashed", dashLength = 4, outlineThickness = 1, outlineColor = "teal", outlineOpacity = 20,
         smoothMotion = true, flashOnApply = true, pulseOutline = false, showSpark = false, showGlow = false,
         glowSize = 4, showShine = false, shineInterval = 4, scrollStripes = false,
@@ -54,6 +56,11 @@ local PRESETS = {
         topOffIcon = "leaf", iconSize = 120, iconPulse = true, showText = true, textPosition = "left", textSize = 11,
     } },
 }
+
+for _, spell in ipairs(ns.SPELLS) do
+    local key = ns.spellKey("color", spell)
+    PRESETS[1].values[key] = ns.DEFAULTS[key]
+end
 
 local window
 local controls = {} -- every row, refreshed after each change
@@ -407,8 +414,9 @@ local function addTab(name)
     button:SetScript("OnClick", function() selectTab(tab) end)
     tab.button = button
 
+    tab.x = 0
     local function place(row, key)
-        row:SetPoint("TOPLEFT", tab.content, "TOPLEFT", 0, -tab.y)
+        row:SetPoint("TOPLEFT", tab.content, "TOPLEFT", tab.x, -tab.y)
         tab.y = tab.y + ROW_HEIGHT
         if key then table.insert(tab.keys, key) end
         return row
@@ -419,6 +427,9 @@ local function addTab(name)
     function tab:action(...) return place(actionRow(self.content, ...)) end
     function tab:info(...) return place(infoRow(self.content, ...)) end
     function tab:gap() self.y = self.y + 8 end
+    function tab:column(index)
+        self.x, self.y = (index - 1) * COLUMN_WIDTH, 0
+    end
 
     table.insert(tabs, tab)
     return tab
@@ -450,9 +461,46 @@ local function buildTabs()
     show:checkbox("showPlates", "Friendly nameplates", { tooltip = "Nameplates of friendly players and NPCs. "
         .. "Friendly players need their health bars on: untick \"show only name\" under friendly players in "
         .. "Options > Nameplates. In dungeons the game may keep friendly nameplates from addons." })
-    show:gap()
-    show:info("Count these HoTs", function() return "" end)
-    for _, spell in ipairs(ns.SPELLS) do show:checkbox("spell" .. spell, "  " .. spell) end
+    show:checkbox("showPet", "Your pet's frame", { tooltip = "For Mend Pet, Health Funnel and your HoTs on your pet." })
+
+    -- What to track: each group on or off, and each spell in it, in two columns.
+    local NOTES = {
+        ["Wild Growth"] = "Its ticks start big and shrink, and it reaches the group members it healed a second after the "
+            .. "cast. Both are estimates.",
+        ["Devouring Plague"] = "Rough: assumes it heals you for all of its damage.",
+        ["Drain Life"] = "Ends when the channel does.",
+        ["Mend Pet"] = "Ends when the channel does.",
+        ["Health Funnel"] = "Ends when the channel does.",
+        ["Healing Stream Totem"] = "It lasts 5 minutes, so only its next 10 seconds show (5 ticks), on you and your party. "
+            .. "Ends with the totem.",
+        ["Lightwell"] = "The renew you get by clicking a Lightwell. Placing one heals no one.",
+        ["Penance"] = "The two hits after the first, when cast on a friend.",
+        ["Bandages"] = "First Aid. Ends when the channel does (damage interrupts it).",
+        ["Food and drink"] = "Ends when you stand up (checked out of combat, which is when you eat).",
+        ["Other"] = "Anything else of yours whose tooltip heals over time.",
+    }
+    local track = addTab("What to track")
+    local function trackGroup(category)
+        local on = function(s) return s("cat" .. category.id) ~= false end
+        track:checkbox("cat" .. category.id, "|cffffd100" .. category.label .. "|r", { layout = CHECK_LAYOUT,
+            tooltip = category.id == "Group" and "Contingency Plan isn't here: its tooltip gives no amounts, and it only "
+                .. "starts below 35% health, which addons can't see." or nil })
+        for _, spell in ipairs(category.spells) do
+            track:checkbox(ns.spellKey("spell", spell), "    " .. spell,
+                { layout = CHECK_LAYOUT, enabledIf = on, tooltip = NOTES[spell] })
+        end
+    end
+    local columnOf = { Others = 1, Self = 1, Pet = 2, Group = 2, Items = 2 }
+    local column
+    for _, category in ipairs(ns.CATEGORIES) do
+        if columnOf[category.id] ~= column then
+            column = columnOf[category.id]
+            track:column(column)
+        else
+            track:gap()
+        end
+        trackGroup(category)
+    end
 
     local single = function(s) return s("hotColors") ~= "bySpell" end
     local bySpell = function(s) return s("hotColors") == "bySpell" end
@@ -462,11 +510,24 @@ local function buildTabs()
     bar:choice("hotColors", "HoT colors", lists.hotColors, { tooltip = "One color for all your HoTs, or one "
         .. "segment per HoT in its own color." })
     bar:choice("healColor", "Heal color", lists.colors, { enabledIf = single })
-    for _, spell in ipairs(ns.SPELLS) do
-        bar:choice("color" .. spell, "  " .. spell, lists.colors, { enabledIf = bySpell })
-    end
+    bar:info("", function() return bySpell(ns.setting) and "Colors per HoT: on the HoT colors tab." or "" end)
     bar:checkbox("segmentDividers", "Dividers between HoTs", { enabledIf = bySpell })
     bar:slider("healOpacity", "Opacity", 10, 100, 5, { suffix = "%" })
+
+    local colors = addTab("HoT colors")
+    local colorColumn
+    for _, category in ipairs(ns.CATEGORIES) do
+        local wanted = (category.id == "Others" or category.id == "Self") and 1 or 2
+        if wanted ~= colorColumn then
+            colorColumn = wanted
+            colors:column(wanted)
+        end
+        colors:info("|cffffd100" .. category.label .. "|r", function() return "" end, { layout = COLOR_LAYOUT })
+        for _, spell in ipairs(category.spells) do
+            colors:choice(ns.spellKey("color", spell), "  " .. spell, lists.colors, { layout = COLOR_LAYOUT,
+                enabledIf = bySpell })
+        end
+    end
 
     local hasOutline = function(s) return s("outlineStyle") ~= "none" end
     local outline = addTab("Outline")

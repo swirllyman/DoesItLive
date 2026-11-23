@@ -136,6 +136,7 @@ Enum = { DamageMeterType = { DamageDone = 0, HealingDone = 2, Absorbs = 3 }, Dam
 C_DamageMeter = { GetCombatSessionSourceFromType = function(session, t)
     return { totalAmount = 1234, combatSpells = { { spellID = 774, totalAmount = 1000, overkillAmount = 0 } } }
 end }
+PetFrameHealthBar, PetFrame = CreateFrame("StatusBar"), {}
 PlayerFrame = { PlayerFrameContent = { PlayerFrameContentMain = { HealthBarsContainer = { HealthBar = CreateFrame("StatusBar") } } } }
 -- The target frame: its own level is secret, a child sits at MEDIUM/1001 (what Forever does).
 local function layered(strata, level, children)
@@ -226,7 +227,7 @@ def main():
         end
     end
     for level, count in pairs(seen) do
-        assert(count == 3, "level " .. level .. " used " .. count .. " times") levels = levels + 1 -- once per widget
+        assert(count == 4, "level " .. level .. " used " .. count .. " times") levels = levels + 1 -- once per unit frame widget
     end
     assert(levels == 11, "layers: " .. levels)
     friendlyTarget = true fireEvent("PLAYER_TARGET_CHANGED") assert(targetShown() == true, "hidden on a friend")

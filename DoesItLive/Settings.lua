@@ -8,13 +8,13 @@ local _, ns = ...
 
 ns.DEFAULTS = {
     -- Where
-    showPlayer = true, showPersonal = true, showTarget = true, showPlates = true,
+    showPlayer = true, showPersonal = true, showTarget = true, showPlates = true, showPet = true,
     -- Which HoTs
-    spellRejuvenation = true, spellRegrowth = true, spellRenew = true, spellRiptide = true,
+    -- (catX and spellX for every category and spell below are added after this table)
     -- Heal fill
     healColor = "teal", healOpacity = 25, fillTexture = "flat",
     hotColors = "bySpell", segmentDividers = true,
-    colorRejuvenation = "teal", colorRegrowth = "green", colorRenew = "cyan", colorRiptide = "blue",
+    -- (colorX for every spell: SPELL_COLORS below)
     -- Outline around the heal
     outlineStyle = "dashed", dashLength = 4, outlineThickness = 1, outlineColor = "teal", outlineOpacity = 20,
     -- Animation and effects
@@ -28,7 +28,54 @@ ns.DEFAULTS = {
     showText = false, textPosition = "left", textSize = 10, textColor = "white",
 }
 
-ns.SPELLS = { "Rejuvenation", "Regrowth", "Renew", "Riptide" }
+-- What can be tracked, in groups the options show (Tracking.lua has how each one heals). The last group catches
+-- anything of yours whose tooltip heals over time (bandages, food, Lightwell's renew, ...).
+ns.CATEGORIES = {
+    { id = "Others", label = "HoTs on others",
+      spells = { "Rejuvenation", "Regrowth", "Renew", "Riptide", "Wild Growth" } },
+    { id = "Self", label = "Heals on yourself", spells = { "Siphon Life", "Drain Life", "Devouring Plague" } },
+    { id = "Pet", label = "Heals on your pet", spells = { "Mend Pet", "Health Funnel" } },
+    { id = "Group", label = "Group and placed", spells = { "Healing Stream Totem", "Lightwell", "Penance" } },
+    { id = "Items", label = "Bandages, food and others", spells = { "Bandages", "Food and drink", "Other" } },
+}
+-- Per-HoT colors: different within each group.
+local SPELL_COLORS = {
+    ["Rejuvenation"] = "teal", ["Regrowth"] = "green", ["Renew"] = "cyan", ["Riptide"] = "blue", ["Wild Growth"] = "purple",
+    ["Siphon Life"] = "pink", ["Drain Life"] = "magenta", ["Devouring Plague"] = "lavender",
+    ["Mend Pet"] = "lime", ["Health Funnel"] = "mint",
+    ["Healing Stream Totem"] = "sky", ["Lightwell"] = "paleBlue", ["Penance"] = "mint",
+    ["Bandages"] = "sky", ["Food and drink"] = "lime", ["Other"] = "teal",
+}
+
+ns.SPELLS, ns.CATEGORY_OF = {}, {}
+-- A spell's setting key: "spell" .. "WildGrowth" (no spaces).
+function ns.spellKey(prefix, name)
+    return prefix .. name:gsub("%s", "")
+end
+for _, category in ipairs(ns.CATEGORIES) do
+    ns.DEFAULTS["cat" .. category.id] = true
+    for _, spell in ipairs(category.spells) do
+        ns.SPELLS[#ns.SPELLS + 1] = spell
+        ns.CATEGORY_OF[spell] = category.id
+        ns.DEFAULTS[ns.spellKey("spell", spell)] = true
+        ns.DEFAULTS[ns.spellKey("color", spell)] = SPELL_COLORS[spell]
+    end
+end
+
+-- The options entry a tracked spell counts under: itself, or a name from the last group.
+function ns.displayGroup(name)
+    if ns.CATEGORY_OF[name] then return name end
+    if name == "First Aid" or name:find("Bandage") then return "Bandages" end
+    if name == "Food" or name == "Refreshment" or name == "Drink" or name:find("Food") then return "Food and drink" end
+    if name:find("Lightwell") then return "Lightwell" end
+    return "Other"
+end
+
+-- Whether the options let this spell count (its group and itself on).
+function ns.spellShown(name)
+    local group = ns.displayGroup(name)
+    return ns.setting("cat" .. ns.CATEGORY_OF[group]) ~= false and ns.setting(ns.spellKey("spell", group)) ~= false
+end
 
 ns.lists = {
     colors = {
@@ -39,6 +86,11 @@ ns.lists = {
         { id = "blue", label = "Blue", rgb = { 0.3, 0.5, 1 } },
         { id = "purple", label = "Purple", rgb = { 0.7, 0.45, 1 } },
         { id = "pink", label = "Pink", rgb = { 1, 0.55, 0.8 } },
+        { id = "magenta", label = "Magenta", rgb = { 0.95, 0.4, 0.95 } },
+        { id = "lavender", label = "Lavender", rgb = { 0.8, 0.7, 1 } },
+        { id = "lime", label = "Lime", rgb = { 0.7, 1, 0.3 } },
+        { id = "mint", label = "Mint", rgb = { 0.6, 1, 0.75 } },
+        { id = "sky", label = "Sky", rgb = { 0.5, 0.75, 1 } },
     },
     textColors = {
         { id = "white", label = "White", rgb = { 1, 1, 1 } },

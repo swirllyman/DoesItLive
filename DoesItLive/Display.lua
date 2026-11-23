@@ -22,7 +22,7 @@ ns.display = display
 
 local TOPS_OFF_BAR_LENGTH = 10000
 local TEXTURE_DIR = "Interface\\AddOns\\DoesItLive\\Textures\\" -- made by tools/make_textures.py
-local MAX_SEGMENTS = 4 -- one per HoT spell
+local MAX_SEGMENTS = 8 -- per-HoT segments; more HoTs than this share the last one
 local SMOOTH_RATE = 10 -- how fast the bar glides to a new value (higher = snappier)
 local STRIPE_SCROLL_PERIOD = 8 -- px; the stripes repeat every 8px
 local SHINE_WIDTH, SHINE_DURATION = 24, 0.9
@@ -36,11 +36,10 @@ local previews = {} -- the options window's mock bars
 local lookVersion = 0 -- bumped when a setting changes, so each widget re-applies its look
 
 -- Which setting turns each place on.
-local PLACE_SETTING = { player = "showPlayer", personal = "showPersonal", target = "showTarget", plate = "showPlates" }
+local PLACE_SETTING = { player = "showPlayer", personal = "showPersonal", target = "showTarget", plate = "showPlates",
+    pet = "showPet" }
 
-local function spellShown(name)
-    return setting("spell" .. name) ~= false
-end
+local spellShown = ns.spellShown
 
 -- The healing to show on a unit (0: nothing), and per HoT ({ name, amount } list, or nil).
 local function amountFor(unit)
@@ -86,6 +85,11 @@ end
 local function findTargetBar()
     local content = TargetFrame and TargetFrame.TargetFrameContent
     return findInContent(content and content.TargetFrameContentMain, TargetFrameHealthBar, "TargetFrame", TargetFrame)
+end
+
+local function findPetBar()
+    local bar = PetFrameHealthBar or (PetFrame and PetFrame.healthbar)
+    if bar then return bar, bar, PetFrameHealthBarMask, "PetFrameHealthBar", PetFrame end
 end
 
 local function findPersonalBar()
@@ -296,6 +300,7 @@ local widgets = {
     createWidget("player", "player", findPlayerBar),
     createWidget("personal", "player", findPersonalBar),
     createWidget("target", "target", findTargetBar),
+    createWidget("pet", "pet", findPetBar),
 }
 
 local function sizeIcon(w, size)
@@ -728,12 +733,15 @@ local function updateWidget(w)
             local part = bySpell and parts[i]
             if part then
                 total = total + part.amount * scale
+                if i == MAX_SEGMENTS then -- the rest share the last segment
+                    for j = i + 1, #parts do total = total + parts[j].amount * scale end
+                end
                 segment.bar:SetMinMaxValues(0, maxHealth)
                 segment.bar:SetValue(total)
-                local r, g, b = ns.colorOf("color" .. part.name)
+                local r, g, b = ns.colorOf(ns.spellKey("color", ns.displayGroup(part.name)))
                 segment.texture:SetVertexColor(r, g, b, opacity)
                 segment.texture:Show()
-                segment.divider:SetShown(setting("segmentDividers") and parts[i + 1] ~= nil)
+                segment.divider:SetShown(setting("segmentDividers") and parts[i + 1] ~= nil and i < MAX_SEGMENTS)
             else
                 segment.texture:Hide()
                 segment.divider:Hide()

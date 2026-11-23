@@ -436,6 +436,7 @@ f:SetScript("OnEvent", function(self, event, ...)
         C_Timer.After(2, function() snapshot("auto, after combat") end)
 
     elseif event == "UNIT_COMBAT" then
+        ns.tracking.onUnitCombat(...)
         onUnitCombat(...)
 
     elseif event == "UNIT_HEALTH" then

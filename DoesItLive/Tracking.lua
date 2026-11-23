@@ -6,9 +6,17 @@
 --     2026-11-22: Rejuvenation 214 in the tooltip, 215 healed; Regrowth 313-352 + 300, 624 healed)
 --   * when it ticks: every 3 seconds from the cast (Rejuvenation and Regrowth seen in the log; Renew and Riptide
 --     assumed). Crits aren't counted.
+--   * Wild Growth (unverified): every second, front-loaded (ticks from 1.3x down to 0.7x of the average, summing to
+--     the tooltip), on the target and the members of your group it reached. Who it reached isn't told: a group member
+--     whose heal ticks about a second after the cast (its first tick, landing on everyone at once) gets it. Heal ticks
+--     report school 1, not Nature, so only the timing tells. Out of combat the auras correct it.
 --   * corrections: out of combat your auras are readable, so a HoT that's gone is dropped, one that's there with
 --     another expiration is moved, and one that was missed (a /reload) is picked up. In combat none of that can be
 --     read: a HoT dispelled or cancelled then stays until it would have expired.
+--   * besides HoTs on others (Settings.lua's groups): heals on yourself from draining spells, on your pet, from
+--     totems and Penance, and bandages, food and anything else of yours whose tooltip heals over time. Channels
+--     (Drain Life, Mend Pet, Health Funnel, Penance, bandages) end when the channel does; Healing Stream Totem lasts
+--     5 minutes, so only its next 10 seconds show, and it ends with the totem.
 -- Loaded after Probe.lua (logging and helpers).
 
 local _, ns = ...
@@ -19,14 +27,83 @@ local tracking = {}
 ns.tracking = tracking
 
 -- By English spell name; ticks every `interval` seconds.
+-- Tooltip readers for the ones that don't say "<n> over <s> sec": total healing, seconds, and seconds per tick.
+local function every(pattern)
+    return function(desc)
+        local amount, interval, seconds = desc:match(pattern)
+        amount, interval, seconds = tonumber(amount), tonumber(interval) or 1, tonumber(seconds)
+        if not amount or not seconds then return nil end
+        return amount * seconds / interval, seconds, interval
+    end
+end
+
+-- How each known spell heals (by English name):
+--   interval: seconds per tick; parse(desc): total, seconds[, interval] when the tooltip isn't "<n> over <s> sec"
+--   on: who's healed: the cast's target (default), "player", "pet" or "group" (you and your party)
+--   aura = false: there's no buff of yours on whoever's healed, so a missing aura doesn't end it
+--   channel: ends when your channel does; allyOnly: only counts cast on a friend; window: ticks shown ahead
 local HOTS = {
     ["Rejuvenation"] = { interval = 3 },
     ["Regrowth"] = { interval = 3 },
     ["Renew"] = { interval = 3 },
     ["Riptide"] = { interval = 3 },
+    ["Wild Growth"] = { interval = 1, frontLoaded = true, spreads = true },
+    -- "Transfers 41 health from the target to the caster every 3 sec. Lasts 30 sec."
+    ["Siphon Life"] = { on = "player", aura = false,
+        parse = every("Transfers (%d+) health from the target to the caster every (%d+) sec%.%s*Lasts (%d+) sec") },
+    -- "Transfers 51 health every 1 second from the target to the caster. Lasts 5 sec."
+    ["Drain Life"] = { on = "player", aura = false, channel = true,
+        parse = every("Transfers (%d+) health every (%d+) seconds? from the target to the caster%.%s*Lasts (%d+) sec") },
+    -- "...causes 848 Shadow damage over 24 sec. Damage caused by the Devouring Plague heals the caster." (rough: what
+    -- it heals isn't stated; assumed to be all of its damage, in 3 second ticks)
+    ["Devouring Plague"] = { on = "player", aura = false, interval = 3,
+        parse = function(desc)
+            local total, seconds = desc:match("(%d+) %a+ damage over (%d+) sec")
+            if total then return tonumber(total), tonumber(seconds), 3 end
+        end },
+    -- "Heals your pet 245 health every second while you focus. Lasts 5 sec."
+    ["Mend Pet"] = { on = "pet", channel = true, parse = function(desc)
+        local amount, seconds = desc:match("Heals your pet (%d+) health every second.-Lasts (%d+) sec")
+        if amount then return tonumber(amount) * tonumber(seconds), tonumber(seconds), 1 end
+    end },
+    -- "Gives 153 health to the caster's pet every second for 10 sec as long as the caster channels."
+    ["Health Funnel"] = { on = "pet", aura = false, channel = true,
+        parse = function(desc)
+            local amount, seconds = desc:match("Gives (%d+) health to the caster's pet every second for (%d+) sec")
+            if amount then return tonumber(amount) * tonumber(seconds), tonumber(seconds), 1 end
+        end },
+    -- "...for 5 min that heals group members within 30 yards for 11 every 2 seconds."
+    ["Healing Stream Totem"] = { on = "group", aura = false, window = 5,
+        parse = function(desc)
+            local minutes = tonumber(desc:match("for (%d+) min"))
+            local amount, interval = desc:match("for (%d+) every (%d+) seconds")
+            amount, interval = tonumber(amount), tonumber(interval)
+            if minutes and amount and interval then return amount * minutes * 60 / interval, minutes * 60, interval end
+        end },
+    -- "...or 673 healing to an ally, instantly and every 1 sec for 2 sec." The instant hit has landed by the cast
+    -- event; the two after it are left.
+    ["Penance"] = { aura = false, channel = true, allyOnly = true,
+        parse = function(desc)
+            local amount, interval, seconds = desc:match("(%d+) healing to an ally, instantly and every (%d+) sec for (%d+) sec")
+            amount, interval, seconds = tonumber(amount), tonumber(interval), tonumber(seconds)
+            if amount then return amount * seconds / interval, seconds, interval end
+        end },
 }
--- Known HoTs left out for now: uneven ticks, on the whole party.
-local UNTRACKED = { ["Wild Growth"] = true }
+-- Ours, but nothing to show: Lightwell (placing it heals no one; clicking it is a renew of its own, caught by the
+-- tooltip rule), Contingency Plan (its amounts are "?" and it only starts below 35% health, which is secret), Dark
+-- Sacrifice (costs health). Tranquility and the like heal at once per tick.
+local IGNORED = { ["Lightwell"] = true, ["Contingency Plan"] = true, ["Dark Sacrifice"] = true }
+local UNTRACKED = {} -- known HoTs left out (none at the moment)
+
+-- Anything else of yours whose tooltip heals over time: bandages ("Heals 2000 damage over 8 sec."), food ("Restores
+-- 2148 health over 30 sec."), Lightwell's renew. Not damage over time, mana, or a heal at once.
+local function healsOverTime(desc)
+    if type(desc) ~= "string" or isSecret(desc) then return false end
+    return (desc:find("^%s*[Hh]eals") or desc:find("[Rr]estores? %d[%d,]* health")) and desc:find("over %d+ sec") ~= nil
+end
+local FRONT_FIRST, FRONT_LAST = 1.3, 0.7 -- Wild Growth's first and last tick, in average ticks (assumed)
+-- A group member healed this long after a spreading HoT's cast was reached by it (its first tick).
+local SPREAD_FROM, SPREAD_TO = 0.5, 1.8
 -- Swiftmend uses up one of these on its target. (Unverified on Forever.)
 local SWIFTMEND_USES = { ["Rejuvenation"] = true, ["Regrowth"] = true }
 
@@ -140,9 +217,23 @@ local function remainingTicks(hot, now)
     return left
 end
 
-local function remainingOf(hot, now)
-    return remainingTicks(hot, now) * hot.perTick
+-- Tick `tick` of `ticks`, in average ticks: 1, or for a front-loaded HoT a straight line from FRONT_FIRST down to
+-- FRONT_LAST (which averages 1, so the ticks still add up to the tooltip).
+function tracking.tickWeight(hot, tick)
+    if not hot.frontLoaded or hot.ticks < 2 then return 1 end
+    return FRONT_FIRST + (FRONT_LAST - FRONT_FIRST) * (tick - 1) / (hot.ticks - 1)
 end
+
+local function remainingOf(hot, now)
+    if hot.window then return math.min(remainingTicks(hot, now), hot.window) * hot.perTick end
+    if not hot.frontLoaded then return remainingTicks(hot, now) * hot.perTick end
+    local sum = 0
+    for tick = 1, hot.ticks do
+        if hot.start + tick * hot.interval > now then sum = sum + hot.perTick * tracking.tickWeight(hot, tick) end
+    end
+    return sum
+end
+tracking.remainingOf = remainingOf
 
 local function drop(key, name, why)
     local hots = hotsByKey[key]
@@ -160,14 +251,34 @@ local function put(key, name, hot)
     hotsByKey[key][name] = hot
 end
 
+-- How a spell heals: its HOTS entry, or for a tooltip that heals over time, a plain one (ticks every 3 seconds
+-- when the time divides by 3, else every second: bandages tick each second, food every 3). Nil if it doesn't.
+local function specFor(name, desc)
+    if HOTS[name] then return HOTS[name] end
+    if IGNORED[name] or not healsOverTime(desc) then return nil end
+    local _, seconds = tracking.parseHot(desc)
+    return { interval = seconds and seconds % 3 == 0 and 3 or 1, generic = true }
+end
+tracking.specFor = specFor
+
 -- A HoT's numbers, or nil (why it can't be tracked, for the log).
 local function newHot(spellID, name, desc, who)
-    local total, seconds = tracking.parseHot(desc)
+    local spec = specFor(name, desc)
+    if not spec then return nil end
+    local total, seconds, interval
+    if spec.parse and type(desc) == "string" and not isSecret(desc) then
+        local plainDesc = desc
+        for _ = 1, 2 do plainDesc = plainDesc:gsub("(%d),(%d%d%d)%f[^%d]", "%1%2") end
+        total, seconds, interval = spec.parse(plainDesc)
+    else
+        total, seconds = tracking.parseHot(desc)
+    end
     if not total then return nil end
-    local interval = HOTS[name].interval
+    interval = interval or spec.interval or 3
     local ticks = math.max(1, math.floor(seconds / interval + 0.5))
     return { spellID = spellID, name = name, who = who, total = total, duration = seconds, interval = interval,
-        ticks = ticks, perTick = total / ticks, start = GetTime(), castAt = GetTime() }
+        ticks = ticks, perTick = total / ticks, start = GetTime(), castAt = GetTime(), frontLoaded = spec.frontLoaded,
+        channel = spec.channel, window = spec.window, noAura = spec.aura == false }
 end
 
 function tracking.any()
@@ -177,7 +288,8 @@ end
 -- Healing your HoTs still have to do on this unit (0 if none), and per HoT: { { name, amount }, ... } in a fixed
 -- spell order (so per-HoT colors don't swap places). shown(spell name), if given, leaves out the HoTs it says no to
 -- (turned off in the options).
-local SPELL_ORDER = { Rejuvenation = 1, Regrowth = 2, Renew = 3, Riptide = 4 }
+local SPELL_ORDER = {} -- by the options' order of groups and spells
+for i, spell in ipairs(ns.SPELLS) do SPELL_ORDER[spell] = i end
 
 function tracking.breakdown(unit, shown)
     if hotCount == 0 then return 0, nil end
@@ -196,7 +308,9 @@ function tracking.breakdown(unit, shown)
         end
     end
     if parts then
-        table.sort(parts, function(a, b) return (SPELL_ORDER[a.name] or 9) < (SPELL_ORDER[b.name] or 9) end)
+        table.sort(parts, function(a, b)
+            return (SPELL_ORDER[ns.displayGroup(a.name)] or 99) < (SPELL_ORDER[ns.displayGroup(b.name)] or 99)
+        end)
     end
     return sum, parts
 end
@@ -243,7 +357,7 @@ local function castTarget(name)
     else
         nameKey, who = "name:" .. name, name
     end
-    return { guidKey = guidKey, nameKey = nameKey, who = who, how = how, at = GetTime() }
+    return { guidKey = guidKey, nameKey = nameKey, who = who, how = how, at = GetTime(), unit = unit }
 end
 
 function tracking.onCastSent(name, castGUID, spellID)
@@ -252,8 +366,8 @@ function tracking.onCastSent(name, castGUID, spellID)
     for guid, sent in pairs(sentCasts) do
         if now - sent.at > SENT_SECONDS then sentCasts[guid] = nil end
     end
-    local spell = spellInfo(spellID)
-    if not spell or not (HOTS[spell] or spell == "Swiftmend") then return end
+    local spell, desc = spellInfo(spellID)
+    if not spell or not (specFor(spell, desc) or spell == "Swiftmend") then return end
     sentCasts[castGUID] = castTarget(name)
 end
 
@@ -282,37 +396,102 @@ function tracking.onCastSucceeded(castGUID, spellID)
         onSwiftmend(sent or castTarget(nil))
         return
     end
-    if not HOTS[spell] then
+    local spec = specFor(spell, desc)
+    if not spec then
         local total, seconds = tracking.parseHot(desc)
-        if UNTRACKED[spell] or (total and desc:find("[Hh]eal")) then
+        if UNTRACKED[spell] or (total and desc:find("[Hh]eal") and not IGNORED[spell]) then
             out(string.format("HOT not tracked: %s id=%s (%s over %s sec): %s", spell, probe(spellID), tostring(total),
                 tostring(seconds), desc or "no description"))
         end
         return
     end
     sent = sent or castTarget(nil)
-    local hot = newHot(spellID, spell, desc, sent.who)
-    if not hot then
-        out("HOT " .. spell .. ": no over-time amount in its description: " .. tostring(desc))
-        return
-    end
-    local key = sent.guidKey or sent.nameKey
-    if not key then
-        out("HOT " .. spell .. ": nothing to keep its target under (" .. sent.how .. ")")
-        return
-    end
-    -- A recast replaces it, wherever the old one is kept.
-    local recast = false
-    for _, old in ipairs({ sent.guidKey or false, sent.nameKey or false }) do
-        if old and hotsByKey[old] and hotsByKey[old][spell] then
-            recast = true
-            drop(old, spell, "recast")
+    if spec.allyOnly and not sent.unit then return end -- cast on an enemy: damage, not healing
+    -- Who's healed: the target, or for draining spells, pets and totems, yourself, your pet or your group.
+    local recipients = {}
+    if spec.on == "player" or spec.on == "pet" then
+        local guidKey, nameKey = keysOf(spec.on)
+        if guidKey or nameKey then
+            recipients[1] = { guidKey = guidKey, nameKey = nameKey, who = namesOf(spec.on) or spec.on, how = spec.on }
         end
+    elseif spec.on == "group" then
+        for _, unit in ipairs({ "player", "party1", "party2", "party3", "party4" }) do
+            local guidKey, nameKey = keysOf(unit)
+            if (guidKey or nameKey) and canAssist(unit) then
+                recipients[#recipients + 1] = { guidKey = guidKey, nameKey = nameKey, who = namesOf(unit) or unit, how = "group" }
+            end
+        end
+    else
+        recipients[1] = sent
     end
-    put(key, spell, hot)
-    out(string.format("ESTIMATE %s on %s (%s)%s: %d over %.0fs, %d ticks of %.1f every %ds%s", spell, sent.who, sent.how,
+    if #recipients == 0 then
+        out("HOT " .. spell .. ": nobody to put it on (" .. tostring(spec.on or sent.how) .. ")")
+        return
+    end
+    local hot, key, recast
+    for i, recipient in ipairs(recipients) do
+        hot = newHot(spellID, spell, desc, recipient.who)
+        if not hot then
+            out("HOT " .. spell .. ": no over-time amount in its description: " .. tostring(desc))
+            return
+        end
+        key = recipient.guidKey or recipient.nameKey
+        if not key then
+            out("HOT " .. spell .. ": nothing to keep its target under (" .. tostring(recipient.how) .. ")")
+            return
+        end
+        -- A recast replaces it, wherever the old one is kept.
+        recast = false
+        for _, old in ipairs({ recipient.guidKey or false, recipient.nameKey or false }) do
+            if old and hotsByKey[old] and hotsByKey[old][spell] then
+                recast = true
+                drop(old, spell, "recast")
+            end
+        end
+        put(key, spell, hot)
+        if i > 1 then out(string.format("ESTIMATE %s also on %s: %d", spell, recipient.who, remainingOf(hot, GetTime()))) end
+        sent = i == 1 and recipient or sent
+    end
+    hot = hotsByKey[recipients[1].guidKey or recipients[1].nameKey][spell]
+    out(string.format("ESTIMATE %s on %s (%s)%s: %d over %.0fs, %d ticks of %.1f every %ds%s%s", spell, sent.who, sent.how,
         recast and " recast" or "", hot.total, hot.duration, hot.ticks, hot.perTick, hot.interval,
+        hot.frontLoaded and string.format(" (front-loaded: first %.1f, last %.1f)", hot.perTick * tracking.tickWeight(hot, 1),
+            hot.perTick * tracking.tickWeight(hot, hot.ticks)) or "",
         sent.guidKey and "" or " (kept by name)"))
+    if spec.spreads then tracking.lastSpread = { spellID = spellID, name = spell, desc = desc, at = hot.castAt,
+        start = hot.start, targetKey = key, inGroup = sent.unit == nil or tracking.inGroup(sent.unit) } end
+    if ns.display then ns.display.refresh() end
+end
+
+-- Whether a unit is in your party or raid (a spreading HoT on it reaches your group).
+function tracking.inGroup(unit)
+    if unit == "player" or unit:match("^party%d") or unit:match("^raid%d") then return true end
+    return plainCall(UnitInParty, unit) == true or plainCall(UnitInRaid, unit) ~= nil
+end
+
+-- UNIT_COMBAT: a heal on a group member right after a spreading HoT's cast means it reached them.
+function tracking.onUnitCombat(unit, action)
+    local spread = tracking.lastSpread
+    if not spread or type(unit) ~= "string" or isSecret(unit) or isSecret(action) or action ~= "HEAL" then return end
+    local since = GetTime() - spread.at
+    if since > SPREAD_TO then
+        tracking.lastSpread = nil
+        return
+    end
+    if since < SPREAD_FROM or not spread.inGroup then return end
+    if not (unit == "player" or unit:match("^party%d+$") or unit:match("^raid%d+$")) then return end
+    local guidKey, nameKey = keysOf(unit)
+    local key = guidKey or nameKey
+    if not key or key == spread.targetKey then return end
+    local old = hotsByKey[key] and hotsByKey[key][spread.name]
+    if old and old.castAt == spread.at then return end -- already counted (the same heal comes for several tokens)
+    local hot = newHot(spread.spellID, spread.name, spread.desc, namesOf(unit) or unit)
+    if not hot then return end
+    hot.start, hot.castAt = spread.start, spread.at
+    if old then drop(key, spread.name, "recast") end
+    put(key, spread.name, hot)
+    out(string.format("SPREAD %s reached %s (healed %.1fs after the cast): %d left", spread.name, hot.who, since,
+        remainingOf(hot, GetTime())))
     if ns.display then ns.display.refresh() end
 end
 
@@ -333,9 +512,7 @@ local function readAuras(unit)
         if aura == nil then return found end
         local name, id, duration, expiration = aura.name, aura.spellId, aura.duration, aura.expirationTime
         if isSecret(name) or isSecret(id) or isSecret(duration) or isSecret(expiration) then return nil end
-        if type(name) == "string" and HOTS[name] then
-            found[name] = { spellID = id, duration = duration, expiration = expiration }
-        end
+        if type(name) == "string" then found[name] = { spellID = id, duration = duration, expiration = expiration } end
     end
     return found
 end
@@ -380,7 +557,7 @@ function tracking.checkUnit(unit)
                         out(string.format("MOVE %s on %s: its aura ends %+.1fs from the estimate", name, hot.who, off))
                     end
                 end
-            elseif now - hot.start > AURA_GRACE_SECONDS then
+            elseif not hot.noAura and now - hot.castAt > AURA_GRACE_SECONDS then
                 drop(key, name, "its aura is gone")
                 changed = true
             end
@@ -390,7 +567,10 @@ function tracking.checkUnit(unit)
         if not known[name] and type(aura.expiration) == "number" and aura.expiration > now
             and type(aura.duration) == "number" and aura.duration > 0 then
             local _, desc = spellInfo(aura.spellID)
-            local hot = newHot(aura.spellID, name, desc, namesOf(unit) or unit)
+            local spec = specFor(name, desc)
+            -- Pets and draining spells have no aura of theirs to find; a channel's aura can't tell when it stops.
+            local hot = spec and spec.aura ~= false and not spec.channel and not spec.on
+                and newHot(aura.spellID, name, desc, namesOf(unit) or unit)
             if hot then
                 if math.abs(aura.duration - hot.duration) > EXPIRY_TOLERANCE then
                     hot.ticks = math.max(1, math.floor(aura.duration / hot.interval + 0.5))
@@ -441,13 +621,56 @@ ticker:SetScript("OnUpdate", function(_, elapsed)
 end)
 
 -- UNIT_AURA can't be compared in combat; checkUnit finds that out itself.
+-- Your channel ended (finished, stopped, or knocked off by damage): its heals stop.
+function tracking.onChannelStop(spellID)
+    local ended = {}
+    for key, hots in pairs(hotsByKey) do
+        for name, hot in pairs(hots) do
+            -- A channel stop for its spell makes it a channel (bandages come from the tooltip rule, unmarked).
+            if (not isSecret(spellID) and spellID ~= nil and hot.spellID == spellID)
+                or (hot.channel and (isSecret(spellID) or spellID == nil)) then
+                ended[#ended + 1] = { key, name }
+            end
+        end
+    end
+    for _, entry in ipairs(ended) do drop(entry[1], entry[2], "channel ended") end
+    if #ended > 0 and ns.display then ns.display.refresh() end
+end
+
+-- Your Healing Stream Totem is gone (destroyed, replaced or recalled): it heals no more.
+function tracking.onTotemUpdate()
+    if type(GetTotemInfo) ~= "function" then return end
+    for slot = 1, 4 do
+        local _, name = plainCall(GetTotemInfo, slot)
+        if type(name) == "string" and name:find("Healing Stream") then return end
+        if name == nil then
+            local ok, raw = pcall(function() return select(2, GetTotemInfo(slot)) end)
+            if ok and isSecret(raw) then return end -- can't tell: keep it
+        end
+    end
+    local gone = {}
+    for key, hots in pairs(hotsByKey) do
+        if hots["Healing Stream Totem"] then gone[#gone + 1] = key end
+    end
+    for _, key in ipairs(gone) do drop(key, "Healing Stream Totem", "totem gone") end
+    if #gone > 0 and ns.display then ns.display.refresh() end
+end
+
 local events = CreateFrame("Frame")
-for _, event in ipairs({ "UNIT_AURA", "PLAYER_REGEN_ENABLED", "PLAYER_ENTERING_WORLD", "PLAYER_TARGET_CHANGED" }) do
+for _, event in ipairs({ "UNIT_AURA", "PLAYER_REGEN_ENABLED", "PLAYER_ENTERING_WORLD", "PLAYER_TARGET_CHANGED",
+    "UNIT_SPELLCAST_CHANNEL_STOP", "PLAYER_TOTEM_UPDATE", "UNIT_PET" }) do
     pcall(events.RegisterEvent, events, event)
 end
-events:SetScript("OnEvent", function(_, event, unit)
+events:SetScript("OnEvent", function(_, event, unit, ...)
+    local args = { ... }
     local ok, err = pcall(function()
-        if event == "UNIT_AURA" then
+        if event == "UNIT_SPELLCAST_CHANNEL_STOP" then
+            if unit == "player" then tracking.onChannelStop(args[2]) end
+        elseif event == "PLAYER_TOTEM_UPDATE" then
+            tracking.onTotemUpdate()
+        elseif event == "UNIT_PET" then
+            if unit == "player" and plainCall(UnitExists, "pet") then tracking.checkUnit("pet") end
+        elseif event == "UNIT_AURA" then
             if type(unit) == "string" and not isSecret(unit) and not ns.inCombat() then tracking.checkUnit(unit) end
         elseif event == "PLAYER_TARGET_CHANGED" then
             if plainCall(UnitExists, "target") then tracking.checkUnit("target") end
