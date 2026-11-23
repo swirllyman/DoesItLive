@@ -14,4 +14,5 @@
   Growth), heals on yourself (Siphon Life, Drain Life, Devouring Plague), on your pet (Mend Pet, Health Funnel, on the
   pet frame), group and placed (Healing Stream Totem, Lightwell's renew, Penance), and bandages, food and anything else
   whose tooltip heals over time. A color per spell on the "HoT colors" tab.
+- Also on Blizzard's party and raid frames (pet rows too), and on your pet's frame.
 - `/dil bar <n>` test heal bar: fits inside the health bar, and also shows on the personal resource display, a friendly target's frame and friendly nameplates (`/dil plates` turns those off).

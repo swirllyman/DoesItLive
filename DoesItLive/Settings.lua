@@ -8,7 +8,7 @@ local _, ns = ...
 
 ns.DEFAULTS = {
     -- Where
-    showPlayer = true, showPersonal = true, showTarget = true, showPlates = true, showPet = true,
+    showPlayer = true, showPersonal = true, showTarget = true, showPlates = true, showPet = true, showRaid = true,
     -- Which HoTs
     -- (catX and spellX for every category and spell below are added after this table)
     -- Heal fill

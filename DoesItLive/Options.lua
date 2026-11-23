@@ -462,6 +462,8 @@ local function buildTabs()
         .. "Friendly players need their health bars on: untick \"show only name\" under friendly players in "
         .. "Options > Nameplates. In dungeons the game may keep friendly nameplates from addons." })
     show:checkbox("showPet", "Your pet's frame", { tooltip = "For Mend Pet, Health Funnel and your HoTs on your pet." })
+    show:checkbox("showRaid", "Party and raid frames", { tooltip = "Blizzard's party and raid frames, pets' rows too. "
+        .. "Only frames of units with your heals on them are drawn on." })
 
     -- What to track: each group on or off, and each spell in it, in two columns.
     local NOTES = {

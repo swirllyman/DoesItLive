@@ -37,7 +37,7 @@ local lookVersion = 0 -- bumped when a setting changes, so each widget re-applie
 
 -- Which setting turns each place on.
 local PLACE_SETTING = { player = "showPlayer", personal = "showPersonal", target = "showTarget", plate = "showPlates",
-    pet = "showPet" }
+    pet = "showPet", raid = "showRaid" }
 
 local spellShown = ns.spellShown
 
@@ -883,7 +883,69 @@ local function refreshPlates()
     end
 end
 
+-- Blizzard's party and raid frames (CompactUnitFrames: .unit and .healthBar). Frames are handed other units as the
+-- group changes, so they're scanned once a second and on roster changes; only frames whose unit has heals get a
+-- widget, and only those are updated (a walk over every frame every update made DoesItDie stutter, its issue #36).
+local RAID_FRAME_NAMES = {}
+for i = 1, 5 do
+    RAID_FRAME_NAMES[#RAID_FRAME_NAMES + 1] = "CompactPartyFrameMember" .. i
+    RAID_FRAME_NAMES[#RAID_FRAME_NAMES + 1] = "CompactPartyFramePet" .. i
+end
+for group = 1, 8 do
+    for member = 1, 5 do RAID_FRAME_NAMES[#RAID_FRAME_NAMES + 1] = "CompactRaidGroup" .. group .. "Member" .. member end
+end
+for i = 1, 80 do RAID_FRAME_NAMES[#RAID_FRAME_NAMES + 1] = "CompactRaidFrame" .. i end
+
+local raidWidgets = setmetatable({}, { __mode = "k" }) -- frame -> widget
+local activeRaid = {} -- frame -> widget, while its unit has heals to show
+local raidLogged = false
+
+local function frameUnit(frame)
+    local ok, unit = pcall(function() return frame.displayedUnit or frame.unit end)
+    if not ok or type(unit) ~= "string" or isSecret(unit) or unit == "" then return nil end
+    return unit
+end
+
+local function releaseRaid(frame)
+    local w = activeRaid[frame]
+    if not w then return end
+    activeRaid[frame] = nil
+    w.unit, w.state = nil, nil
+    w.root:Hide()
+end
+
+local function scanRaidFrames()
+    local wanted = not nothingToShow() and setting("showRaid")
+    for _, name in ipairs(RAID_FRAME_NAMES) do
+        local frame = _G[name]
+        if type(frame) == "table" then
+            local unit = wanted and plain(frame, "IsVisible") ~= false and frameUnit(frame)
+            if unit and amountFor(unit) > 0 and type(frame.healthBar) == "table" then
+                local w = raidWidgets[frame]
+                if not w then
+                    w = createWidget("raid", unit, function()
+                        return frame.healthBar, frame.healthBar, nil, name .. ".healthBar", frame
+                    end)
+                    w.quiet = true
+                    raidWidgets[frame] = w
+                    if not raidLogged then
+                        raidLogged = true
+                        out("BAR raid frames: drawing on " .. name .. " (" .. unit .. ")")
+                    end
+                end
+                if w.unit ~= unit then w.lastTarget, w.shownAmount = 0, 0 end
+                w.unit = unit
+                activeRaid[frame] = w
+                checkHost(w)
+            else
+                releaseRaid(frame)
+            end
+        end
+    end
+end
+
 local function hideAll()
+    for frame in pairs(activeRaid) do releaseRaid(frame) end
     for _, w in ipairs(widgets) do
         w.root:Hide()
         w.shownAmount, w.lastTarget = 0, 0
@@ -921,6 +983,8 @@ driver:SetScript("OnUpdate", function(_, elapsed)
         if check then checkHost(w) end
         updateWidget(w)
     end
+    if check then scanRaidFrames() end
+    for _, w in pairs(activeRaid) do updateWidget(w) end
     for _, w in pairs(previews) do updateWidget(w) end
 end)
 
@@ -948,10 +1012,19 @@ function display.refresh()
     end
     refreshPlates()
     for _, w in pairs(activePlates) do updateWidget(w) end
+    scanRaidFrames()
+    for _, w in pairs(activeRaid) do updateWidget(w) end
     for _, w in pairs(previews) do
         checkHost(w)
         updateWidget(w)
     end
+end
+
+-- The group changed: the party and raid frames may show other units now.
+function display.onRosterChanged()
+    if nothingToShow() then return end
+    scanRaidFrames()
+    for _, w in pairs(activeRaid) do updateWidget(w) end
 end
 
 -- A setting changed: every widget re-applies its look and re-lays itself over its host.

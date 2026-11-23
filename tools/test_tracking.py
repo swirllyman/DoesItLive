@@ -314,6 +314,26 @@ DoesItLiveDB.spellMendPet = true DoesItLiveDB.showPet = false NS.display.setting
 expect("pet frame off", petRoot.shown, false)
 DoesItLiveDB.showPet = true NS.display.settingsChanged()
 fireEvent("UNIT_SPELLCAST_CHANNEL_STOP", "player", "c", 136)
+-- Party and raid frames: only frames whose unit has heals get one, and frames handed another unit follow it.
+local function compact(unit) return { unit = unit, healthBar = CreateFrame("StatusBar") } end
+CompactPartyFrameMember1, CompactPartyFrameMember2, CompactRaidFrame3 = compact("player"), compact("party1"), compact("party2")
+local function raidRoot(frame) return rootOver(frame.healthBar, UIParent) end
+cast(139, "Pal Smith") wait(1.2)
+expect("party member's frame", raidRoot(CompactPartyFrameMember2) and raidRoot(CompactPartyFrameMember2).shown, true)
+expect("no frame for you (nothing on you)", raidRoot(CompactPartyFrameMember1), nil)
+expect("none for an empty unit", raidRoot(CompactRaidFrame3), nil)
+CompactPartyFrameMember2.unit, CompactRaidFrame3.unit = "party2", "party1" -- the group was reordered
+fireEvent("GROUP_ROSTER_UPDATE")
+expect("old frame let go", raidRoot(CompactPartyFrameMember2).shown, false)
+expect("new frame", raidRoot(CompactRaidFrame3) and raidRoot(CompactRaidFrame3).shown, true)
+DoesItLiveDB.showRaid = false NS.display.settingsChanged() expect("raid frames off", raidRoot(CompactRaidFrame3).shown, false)
+DoesItLiveDB.showRaid = true NS.display.settingsChanged() expect("raid frames on", raidRoot(CompactRaidFrame3).shown, true)
+cast(136, "Wolf") CompactPartyFramePet1 = compact("pet") wait(1.2)
+expect("pet row", raidRoot(CompactPartyFramePet1) and raidRoot(CompactPartyFramePet1).shown, true)
+fireEvent("UNIT_SPELLCAST_CHANNEL_STOP", "player", "c", 136)
+wait(16) expect("all gone", raidRoot(CompactRaidFrame3).shown, false)
+CompactPartyFrameMember1, CompactPartyFrameMember2, CompactRaidFrame3, CompactPartyFramePet1 = nil, nil, nil, nil
+
 -- More HoTs than segments, with a color per HoT.
 DoesItLiveDB.hotColors = "bySpell" NS.display.settingsChanged()
 cast(774, "Joe Gg") cast(8936, "Joe Gg") cast(18265, "Mob") cast(2944, "Mob") cast(7001, "") cast(433, "")
