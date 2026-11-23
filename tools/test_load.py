@@ -25,6 +25,7 @@ local function newObject()
             elseif k == "GetFrameLevel" then return 3
             elseif k == "GetFrameStrata" then return "MEDIUM"
             elseif k == "GetName" then return nil
+            elseif k == "GetObjectType" then return rawget(self, "_kind") or "Frame"
             elseif k == "GetStringWidth" then return fakeStringWidth or 40
             elseif k == "GetFont" then return "Fonts\\FRIZQT__.TTF", 10
             end
@@ -34,7 +35,7 @@ local function newObject()
 end
 function CreateFrame(kind, name, parent)
     local f = newObject()
-    rawset(f, "_parent", parent) rawset(f, "shown", true)
+    rawset(f, "_parent", parent) rawset(f, "shown", true) rawset(f, "_kind", kind)
     rawset(f, "Show", function(self) self.shown = true end)
     rawset(f, "Hide", function(self) self.shown = false end)
     rawset(f, "SetShown", function(self, s) self.shown = s and true or false end)

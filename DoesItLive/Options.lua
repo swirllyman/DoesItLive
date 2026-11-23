@@ -353,6 +353,48 @@ local function pushButton(parent, text, width, onClick)
     return button
 end
 
+-- A frame path setting (Frames.lua): a text box (saved on Enter or leaving it) and a Pick button that takes the
+-- next click on screen.
+local function frameRow(parent, key, labelText, opts)
+    opts = opts or {}
+    local row = makeRow(parent, labelText, opts)
+    local box = CreateFrame("EditBox", nil, row, "BackdropTemplate")
+    box:SetSize(row.layout.control - (opts.noPick and 0 or 58), 22)
+    box:SetPoint("LEFT", row, "LEFT", row.layout.label, 0)
+    setBackdrop(box, 0.13)
+    box:SetFontObject("GameFontHighlightSmall")
+    box:SetTextInsets(6, 6, 0, 0)
+    box:SetAutoFocus(false)
+    local function save(value)
+        db()[key] = strtrim(value or "")
+        changed()
+    end
+    box:SetScript("OnEnterPressed", function(self) self:ClearFocus() end)
+    box:SetScript("OnEscapePressed", function(self)
+        self:SetText(ns.setting(key))
+        self:ClearFocus()
+    end)
+    box:SetScript("OnEditFocusLost", function(self)
+        if strtrim(self:GetText() or "") ~= ns.setting(key) then save(self:GetText()) end
+    end)
+    if not opts.noPick then
+        local pick = pushButton(row, "Pick", 52, function()
+            print("Click the health bar to use (you may need to move this window). Right-click cancels.")
+            ns.startFramePick("bar", function(path)
+                box:SetText(path)
+                save(path)
+                print("Picked " .. path .. ".")
+            end)
+        end)
+        pick:SetPoint("LEFT", box, "RIGHT", 6, 0)
+    end
+    function row:Refresh()
+        if not box:HasFocus() then box:SetText(ns.setting(key) or "") end
+        self:ApplyEnabled(box)
+    end
+    return row
+end
+
 local function actionRow(parent, labelText, buttonText, onClick, opts)
     opts = opts or {}
     local row = makeRow(parent, labelText, opts)
@@ -422,6 +464,7 @@ local function addTab(name)
     function tab:choice(key, ...) return place(choice(self.content, key, ...), key) end
     function tab:action(...) return place(actionRow(self.content, ...)) end
     function tab:info(...) return place(infoRow(self.content, ...)) end
+    function tab:frame(key, ...) return place(frameRow(self.content, key, ...), key) end
     function tab:gap() self.y = self.y + 8 end
     function tab:column(index)
         self.x, self.y = (index - 1) * COLUMN_WIDTH, 0
@@ -621,6 +664,21 @@ local function buildTabs()
             .. "return to your HoTs." })
     local back = pushButton(controls[#controls], "Back", 70, function() SlashCmdList.DOESITLIVE("bar") end)
     back:SetPoint("LEFT", controls[#controls].button, "RIGHT", 6, 0)
+    advanced:gap()
+    -- Unit frame and nameplate addons: EllesmereUI's, BetterBlizzFrames' and most nameplate addons' bars are found by
+    -- themselves; these are for one that isn't.
+    local PATH_TIP = " Leave empty to find it by itself (Blizzard's, EllesmereUI's or BetterBlizzFrames'). Or click "
+        .. "Pick, then the bar; or type the frame's name (/fstack shows it). The bar must fill left to right."
+    advanced:frame("customPlayerBar", "Player health bar", { tooltip = "For a unit frame addon's player frame." .. PATH_TIP })
+    advanced:info("  in use", function() return ns.display.status("player") end)
+    advanced:frame("customTargetBar", "Target health bar", { tooltip = "For a unit frame addon's target frame." .. PATH_TIP })
+    advanced:info("  in use", function() return ns.display.status("target") end)
+    advanced:frame("customPetBar", "Pet health bar", { tooltip = "For a unit frame addon's pet frame." .. PATH_TIP })
+    advanced:info("  in use", function() return ns.display.status("pet") end)
+    advanced:frame("customPlateBar", "Nameplate health bar", { noPick = true, tooltip = "Most nameplate addons' bars "
+        .. "are found by themselves (EllesmereUI, Platynator, Threat Plates, Plater, ...). If the bar doesn't show on "
+        .. "yours, type the keys from Blizzard's nameplate to its health bar, like UnitFrame.healthBar. Leave empty "
+        .. "to find it by itself." })
     advanced:gap()
     advanced:action("All settings", "Reset", function()
         for key, value in pairs(ns.DEFAULTS) do db()[key] = value end

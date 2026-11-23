@@ -305,6 +305,35 @@ DoesItLiveDB.spellRenew = false NS.display.settingsChanged() wait(0.3) expect("R
 expect("still tracked", left("party1"), 830)
 DoesItLiveDB.spellRenew = true NS.display.settingsChanged() wait(0.3) expect("Renew back", plateRoot.shown, true)
 wait(16) expect("nameplate after", plateRoot.shown, false)
+-- Unit frame and nameplate addons: EllesmereUI's target frame and plate, a custom player bar.
+EllesmereUIUnitFrames_Target = { Health = CreateFrame("StatusBar") }
+MyPlayerBar = CreateFrame("StatusBar")
+DoesItLiveDB.customPlayerBar = "MyPlayerBar" NS.display.settingsChanged()
+local euiPlate = CreateFrame("Frame", nil, plates.nameplate1)
+euiPlate.nameplate, euiPlate.health = plates.nameplate1, CreateFrame("StatusBar")
+EllesmereNameplates_NS = { plates = { nameplate1 = euiPlate } }
+friendlyTarget, names.target, guids.target = true, { "Pal", "Smith" }, "Player-2"
+cast(774, "Joe Gg") cast(139, "Pal Smith") wait(1.2)
+expect("custom player bar", rootOver(MyPlayerBar, UIParent) and rootOver(MyPlayerBar, UIParent).shown, true)
+expect("the player widget moved there", rawget(playerRoot, "over") == MyPlayerBar, true)
+local euiTarget = rootOver(EllesmereUIUnitFrames_Target.Health, UIParent)
+expect("EllesmereUI target frame", euiTarget and euiTarget.shown, true)
+fireEvent("NAME_PLATE_UNIT_REMOVED", "nameplate1") fireEvent("NAME_PLATE_UNIT_ADDED", "nameplate1")
+local euiRoot = rootOver(euiPlate.health, euiPlate)
+expect("EllesmereUI nameplate, on its own plate frame", euiRoot and euiRoot.shown, true)
+assert(NS.display.status("player"):find("MyPlayerBar"), "status: " .. NS.display.status("player"))
+assert(NS.display.status("target"):find("EllesmereUI"), "status: " .. NS.display.status("target"))
+-- Hidden with the frame it's on.
+EllesmereUIUnitFrames_Target.Health.IsVisible = function() return false end
+wait(1.2) expect("hidden with EllesmereUI's frame", euiTarget.shown, false)
+EllesmereUIUnitFrames_Target, MyPlayerBar, EllesmereNameplates_NS = nil, nil, nil
+DoesItLiveDB.customPlayerBar = "" NS.display.settingsChanged()
+cast(774, "Joe Gg") wait(0.2)
+expect("back on Blizzard's player bar", rawget(playerRoot, "over") == PlayerFrame.PlayerFrameContent.PlayerFrameContentMain.HealthBarsContainer, true)
+friendlyTarget, names.target, guids.target = false, { "Mob" }, "Creature-9"
+fireEvent("NAME_PLATE_UNIT_REMOVED", "nameplate1") fireEvent("NAME_PLATE_UNIT_ADDED", "nameplate1")
+wait(16) expect("back on Blizzard's", playerRoot.shown, false)
+
 -- The pet frame, and a group turned off.
 wait(16) cast(136, "Wolf") expect("pet frame", petRoot.shown, true) expect("player frame", playerRoot.shown, false)
 DoesItLiveDB.catPet = false NS.display.settingsChanged() wait(0.3) expect("pet heals off", petRoot.shown, false)

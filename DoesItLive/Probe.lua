@@ -65,6 +65,8 @@ end
 
 -- For Tracking.lua and Display.lua (loaded after this file).
 ns.isSecret, ns.probe, ns.call, ns.out = isSecret, probe, call, out
+function ns.print(msg) out(msg, true) end -- (Frames.lua, from DoesItDie, uses these two)
+ns.trace = out
 function ns.db() return db end
 
 local function readableNumber(v)
@@ -410,6 +412,7 @@ f:SetScript("OnEvent", function(self, event, ...)
         local optionsOK, optionsErr = pcall(ns.registerOptions)
         if not optionsOK then out("Options > AddOns page ERROR " .. tostring(optionsErr)) end
         ns.display.settingsChanged()
+        C_Timer.After(5, function() pcall(ns.display.logAddonFrames) end) -- once their frames exist
         if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
             out("ADDONMSG register prefix: " .. probe(select(2, pcall(C_ChatInfo.RegisterAddonMessagePrefix, PREFIX))))
         end

@@ -66,7 +66,52 @@ local function plainSize(region, method)
 end
 
 -- Each finder returns: the health bar, the region its visible part is limited to, its mask (or nil), the path, and
--- the whole unit frame (to layer above).
+-- the whole unit frame (to layer above). In order: the Advanced tab's custom frame, a known replacement frame
+-- (EllesmereUI's, BetterBlizzFrames' bigger bars), Blizzard's.
+local function firstFound(...)
+    for i = 1, select("#", ...) do
+        local finder = select(i, ...)
+        local found = { pcall(finder) }
+        if found[1] and found[2] then return select(2, unpack(found)) end
+    end
+end
+
+local function isBar(region)
+    return type(region) == "table" and type(region.GetStatusBarTexture) == "function"
+end
+
+local function customFinder(key)
+    return function()
+        local path = setting(key)
+        if type(path) ~= "string" or strtrim(path) == "" then return nil end
+        local bar = ns.resolveFramePath(path)
+        if isBar(bar) then return bar, bar, nil, "custom " .. strtrim(path), ns.frameRoot(bar) end
+    end
+end
+
+-- EllesmereUI draws its own unit frames, globals named like these, with the bar at .Health (target and focus
+-- verified by DoesItDie's users; player and pet follow the same naming, unverified: logAddonFrames shows what's there).
+local ELLESMERE_FRAMES = { player = "EllesmereUIUnitFrames_Player", target = "EllesmereUIUnitFrames_Target",
+    pet = "EllesmereUIUnitFrames_Pet" }
+
+local function ellesmereFinder(kind)
+    return function()
+        local name = ELLESMERE_FRAMES[kind]
+        local bar = ns.resolveFramePath(name .. ".Health")
+        if isBar(bar) then return bar, bar, nil, name .. ".Health (EllesmereUI)", _G[name] end
+    end
+end
+
+-- BetterBlizzFrames hides Blizzard's bar (alpha 0) and draws a bigger one of its own; BBF.HealthBar gives that one
+-- while it's active, else Blizzard's (which the Blizzard finder handles, mask and all).
+local function betterBlizzFinder(frame, blizzardBar)
+    return function()
+        local unitFrame, bar = frame(), nil
+        if unitFrame then bar = ns.betterBlizzHealthBar(unitFrame) end
+        if isBar(bar) and bar ~= blizzardBar() then return bar, bar, nil, "BetterBlizzFrames' health bar", unitFrame end
+    end
+end
+
 local function findInContent(main, fallback, frameName, frame)
     local container = main and main.HealthBarsContainer
     if container and container.HealthBar then
@@ -77,19 +122,35 @@ local function findInContent(main, fallback, frameName, frame)
     if bar then return bar, bar, nil, frameName .. " (older layout)", frame end
 end
 
-local function findPlayerBar()
+local function findBlizzardPlayerBar()
     local content = PlayerFrame and PlayerFrame.PlayerFrameContent
     return findInContent(content and content.PlayerFrameContentMain, PlayerFrameHealthBar, "PlayerFrame", PlayerFrame)
 end
 
-local function findTargetBar()
+local function findBlizzardTargetBar()
     local content = TargetFrame and TargetFrame.TargetFrameContent
     return findInContent(content and content.TargetFrameContentMain, TargetFrameHealthBar, "TargetFrame", TargetFrame)
 end
 
-local function findPetBar()
+local function findPlayerBar()
+    return firstFound(customFinder("customPlayerBar"), ellesmereFinder("player"),
+        betterBlizzFinder(function() return PlayerFrame end, function() return (findBlizzardPlayerBar()) end),
+        findBlizzardPlayerBar)
+end
+
+local function findTargetBar()
+    return firstFound(customFinder("customTargetBar"), ellesmereFinder("target"),
+        betterBlizzFinder(function() return TargetFrame end, function() return (findBlizzardTargetBar()) end),
+        findBlizzardTargetBar)
+end
+
+local function findBlizzardPetBar()
     local bar = PetFrameHealthBar or (PetFrame and PetFrame.healthbar)
     if bar then return bar, bar, PetFrameHealthBarMask, "PetFrameHealthBar", PetFrame end
+end
+
+local function findPetBar()
+    return firstFound(customFinder("customPetBar"), ellesmereFinder("pet"), findBlizzardPetBar)
 end
 
 local function findPersonalBar()
@@ -483,7 +544,7 @@ local function updateLayer(w, frame)
             return
         end
         if w.plate then -- as in DoesItDie: the plate's strata, above its health bar
-            local strata, level = plain(w.plate, "GetFrameStrata"), plain(w.bar, "GetFrameLevel")
+            local strata, level = plain(w.addonBar and w.bar or w.plate, "GetFrameStrata"), plain(w.bar, "GetFrameLevel")
             for i, layer in ipairs(w.layers) do
                 if strata then layer:SetFrameStrata(strata) end
                 if type(level) == "number" then layer:SetFrameLevel(math.min(level + 20 + i, 9999)) end
@@ -782,14 +843,184 @@ local function platesWanted()
     return not nothingToShow() and setting("showPlates") and true or false
 end
 
-local function plateHealthBar(plate)
+-- Nameplate addons (from DoesItDie's Nameplates.lua, where each is verified or noted): the health bar a plate shows,
+-- the frame our widget goes on, where it was found, and whether it's an addon's bar (drawn in its own strata).
+local function barShown(bar)
+    local ok, visible = pcall(bar.IsVisible, bar)
+    if ok and not isSecret(visible) and visible == false then return false end
+    local okAlpha, alpha = pcall(bar.GetEffectiveAlpha, bar)
+    if okAlpha and type(alpha) == "number" and not isSecret(alpha) and alpha <= 0 then return false end
+    return true
+end
+
+local function isStatusBar(value)
+    if type(value) ~= "table" or type(value.GetObjectType) ~= "function" then return false end
+    local ok, kind = pcall(value.GetObjectType, value)
+    return ok and kind == "StatusBar"
+end
+
+local function forbiddenFrame(frame)
+    local ok, result = pcall(function() return frame.IsForbidden and frame:IsForbidden() end)
+    return not ok or result == true
+end
+
+-- The Advanced tab's nameplate keys, from Blizzard's plate: "UnitFrame.healthBar".
+local function resolveFromPlate(plate, path)
+    local current = plate
+    for key in string.gmatch(path, "[^%.]+") do
+        local ok, value = pcall(function() return current[key] end)
+        if not ok or type(value) ~= "table" then return nil end
+        current = value
+    end
+    if current ~= plate and isStatusBar(current) then return current end
+end
+
+-- Platynator: its display frames are reassigned between units and may hang off UIParent; the active one for a
+-- unit has .unit and a health widget with .statusBar. Scanned (throttled) when a unit has none.
+local platyDisplays, platyLastScan = {}, -math.huge
+local function platyBarFor(unit)
+    for frame in pairs(platyDisplays) do
+        if frame.unit == unit and frame:IsShown() and type(frame.widgets) == "table" then
+            for _, widget in ipairs(frame.widgets) do
+                if type(widget.details) == "table" and widget.details.kind == "health" and widget.statusBar then
+                    return widget.statusBar
+                end
+            end
+        end
+    end
+end
+local function findPlatynatorBar(plate, unit)
+    if not (Platynator and unit) then return nil end
+    local bar = platyBarFor(unit)
+    if bar or GetTime() - platyLastScan < 2 then return bar end
+    platyLastScan = GetTime()
+    for _, parent in ipairs({ UIParent, plate }) do
+        for _, child in ipairs({ parent:GetChildren() }) do
+            if type(child.widgets) == "table" and type(child.Install) == "function" and type(child.SetUnit) == "function" then
+                platyDisplays[child] = true
+            end
+        end
+    end
+    return platyBarFor(unit)
+end
+
+-- Threat Plates: its plate frame hangs off WorldFrame; the plate references it while active.
+local function findThreatPlatesBar(plate)
+    local tp = plate.TPFrame
+    if type(tp) ~= "table" or not tp.Active or type(tp.visual) ~= "table" then return nil end
+    local bar = tp.visual.Healthbar or tp.visual.healthbar
+    if isStatusBar(bar) and not forbiddenFrame(bar) and barShown(bar) then return bar end
+end
+
+-- Other plate addons (Plater, KUI, ...): a shown StatusBar under a field named like "health" among the frames
+-- inside the plate (breadth-first, Blizzard's UnitFrame skipped, each field under its own pcall), cached per plate
+-- and searched again at most once a second.
+local searchCache = setmetatable({}, { __mode = "k" })
+local function isUnder(frame, plate)
+    local current = frame
+    for _ = 1, 12 do
+        local ok, parent = pcall(current.GetParent, current)
+        if not ok or parent == nil then return false end
+        if parent == plate then return true end
+        current = parent
+    end
+    return false
+end
+local function tableFields(container, plainTable)
+    local ok, fields = pcall(function()
+        local found, count = {}, 0
+        for key, value in pairs(container) do
+            count = count + 1
+            if plainTable and count > 200 then return nil end
+            if type(key) == "string" and type(value) == "table" then found[#found + 1] = { key, value } end
+        end
+        return found
+    end)
+    if not ok or not fields then return nil end
+    table.sort(fields, function(a, b) return a[1] < b[1] end)
+    return fields
+end
+local function searchHealthBar(plate)
+    local blizzardBar = plate.UnitFrame and plate.UnitFrame.healthBar
+    local queue, seen, head = { { node = plate, path = "", depth = 0, plainTable = false } }, { [plate] = true }, 1
+    while queue[head] do
+        local item = queue[head]
+        head = head + 1
+        local fields = tableFields(item.node, item.plainTable)
+        if fields then
+            for _, field in ipairs(fields) do
+                local key, value = field[1], field[2]
+                local ok, found = pcall(function()
+                    return key:lower():find("health", 1, true) and value ~= blizzardBar and isStatusBar(value)
+                        and not forbiddenFrame(value) and isUnder(value, plate) and barShown(value)
+                end)
+                if ok and found then return value, item.path .. key end
+            end
+            if item.depth < 4 then
+                for _, field in ipairs(fields) do
+                    local value = field[2]
+                    if not seen[value] and value ~= plate.UnitFrame then
+                        seen[value] = true
+                        local isFrameValue = pcall(function() return value:GetObjectType() end)
+                        local ok, visit = pcall(function()
+                            if isFrameValue then
+                                return not isStatusBar(value) and not forbiddenFrame(value) and isUnder(value, plate)
+                            end
+                            return true
+                        end)
+                        if ok and visit then
+                            queue[#queue + 1] = { node = value, path = item.path .. field[1] .. ".", depth = item.depth + 1,
+                                plainTable = not isFrameValue }
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+local function autoHealthBar(plate)
+    local cached, now = searchCache[plate], GetTime()
+    if cached and cached.bar and barShown(cached.bar) then return cached.bar, cached.path end
+    if cached and now - cached.at < 1 then return nil end
+    local ok, bar, path = pcall(searchHealthBar, plate)
+    if not ok then bar, path = nil, nil end
+    searchCache[plate] = { bar = bar, path = path, at = now }
+    return bar, path
+end
+
+-- In order: the custom keys, EllesmereUI's own plate (our widget goes on it, to fade and scale with it),
+-- Platynator, Threat Plates, Blizzard's bar while shown, the automatic search. Nothing when only a hidden bar is left.
+local function plateHealthBar(plate, unit)
+    local custom = strtrim(setting("customPlateBar") or "")
+    if custom ~= "" then
+        local bar = resolveFromPlate(plate, custom)
+        if bar and barShown(bar) then return bar, "custom " .. custom, plate, true end
+    end
+    local eui = EllesmereNameplates_NS
+    local euiPlate = type(eui) == "table" and type(eui.plates) == "table" and unit and eui.plates[unit]
+    if type(euiPlate) == "table" and euiPlate.nameplate == plate and isBar(euiPlate.health) then
+        return euiPlate.health, "EllesmereUI plate.health", euiPlate, true
+    end
+    local okPlaty, platyBar = pcall(findPlatynatorBar, plate, unit)
+    if okPlaty and platyBar then return platyBar, "Platynator health widget", plate, true end
+    local okTP, tpBar = pcall(findThreatPlatesBar, plate)
+    if okTP and tpBar then return tpBar, "Threat Plates TPFrame.visual.Healthbar", plate, true end
     local unitFrame = plate.UnitFrame
-    if type(unitFrame) ~= "table" then return nil, "no UnitFrame" end
-    local container = unitFrame.HealthBarsContainer
-    if unitFrame.healthBar then return unitFrame.healthBar, "UnitFrame.healthBar" end
-    if container and container.healthBar then return container.healthBar, "UnitFrame.HealthBarsContainer.healthBar" end
-    if unitFrame.HealthBar then return unitFrame.HealthBar, "UnitFrame.HealthBar" end
-    return nil, "no health bar in UnitFrame"
+    if type(unitFrame) == "table" then
+        local container = unitFrame.HealthBarsContainer
+        local bar, path
+        if unitFrame.healthBar then
+            bar, path = unitFrame.healthBar, "UnitFrame.healthBar"
+        elseif container and container.healthBar then
+            bar, path = container.healthBar, "UnitFrame.HealthBarsContainer.healthBar"
+        elseif unitFrame.HealthBar then
+            bar, path = unitFrame.HealthBar, "UnitFrame.HealthBar"
+        end
+        if bar and barShown(bar) then return bar, path, plate, false end
+    end
+    local found, path = autoHealthBar(plate)
+    if found then return found, "auto " .. path, plate, true end
+    return nil, type(unitFrame) == "table" and "no shown health bar (a plate addon this can't read?)" or "no UnitFrame"
 end
 
 local function isForbidden(frame)
@@ -835,25 +1066,26 @@ local function addPlate(unit)
         logPlate(unit, "plate forbidden")
         return
     end
-    local okBar, bar, path = pcall(plateHealthBar, plate)
+    local okBar, bar, path, host, addonBar = pcall(plateHealthBar, plate, unit)
     if not okBar or not bar or isForbidden(bar) then
         logPlate(unit, "plate ok, bar not reachable: " .. tostring(okBar and path or bar))
         return
     end
-    local w = plateWidgets[plate]
+    local w = plateWidgets[host]
     if not w then
         local created
-        created, w = pcall(createWidget, "plate", unit, nil, plate)
+        created, w = pcall(createWidget, "plate", unit, nil, host)
         if not created then
             logPlate(unit, "widget ERROR " .. tostring(w))
             return
         end
         w.quiet = true
-        w.find = function()
-            local found, foundPath = plateHealthBar(plate)
-            return found, found, nil, foundPath, plate
-        end
-        plateWidgets[plate] = w
+        plateWidgets[host] = w
+    end
+    w.addonBar = addonBar
+    w.find = function()
+        local found, foundPath = plateHealthBar(plate, w.unit)
+        return found, found, nil, foundPath, plate
     end
     w.unit, w.errorLogged, w.layerErrorLogged = unit, false, false
     activePlates[unit] = w
@@ -987,6 +1219,38 @@ driver:SetScript("OnUpdate", function(_, elapsed)
     for _, w in pairs(activeRaid) do updateWidget(w) end
     for _, w in pairs(previews) do updateWidget(w) end
 end)
+
+-- What each place is drawing on, for the Advanced tab ("not found" before it's been looked for).
+function display.status(name)
+    for _, w in ipairs(widgets) do
+        if w.name == name then
+            if not w.bar then
+                local ok, _, _, _, path = pcall(w.find)
+                return ok and path and ("|cff888888" .. path .. " (not drawn yet)|r") or "|cff888888not found|r"
+            end
+            local path = (w.signature or ""):match("^([^|]*)")
+            if path and path:find("^custom ") then return "|cff66ff66" .. path:sub(8) .. "|r" end
+            return path or "?"
+        end
+    end
+    return "?"
+end
+
+-- Logs (once, a few seconds after loading) which EllesmereUI frames exist, so their names can be checked.
+function display.logAddonFrames()
+    if type(EllesmereUI) ~= "table" and type(EllesmereNameplates_NS) ~= "table"
+        and type(_G.EllesmereUIUnitFrames_Target) ~= "table" then return end
+    local found = {}
+    for name, value in pairs(_G) do
+        if type(name) == "string" and name:find("^EllesmereUI") and type(value) == "table"
+            and type(value.GetObjectType) == "function" then
+            found[#found + 1] = name .. (isBar(value.Health) and " (.Health)" or "")
+            if #found >= 60 then break end
+        end
+    end
+    table.sort(found)
+    out("ADDON EllesmereUI frames: " .. (#found > 0 and table.concat(found, ", ") or "none found"))
+end
 
 function display.onTargetChanged()
     if nothingToShow() then return end

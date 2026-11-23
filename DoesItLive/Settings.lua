@@ -26,6 +26,8 @@ ns.DEFAULTS = {
     topOffIcon = "plus", iconSize = 100, iconPulse = false,
     -- Text
     showText = false, textPosition = "left", textSize = 10, textColor = "white",
+    -- Unit frame addons the addon doesn't know: a frame path (Frames.lua), or keys from the nameplate
+    customPlayerBar = "", customTargetBar = "", customPetBar = "", customPlateBar = "",
 }
 
 -- What can be tracked, in groups the options show (Tracking.lua has how each one heals). The last group catches
