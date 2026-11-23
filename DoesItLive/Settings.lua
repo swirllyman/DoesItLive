@@ -1,6 +1,7 @@
 -- DoesItLive settings: defaults (filled into DoesItLiveDB on load) and the choices the options window offers.
 -- Read them through ns.setting(key), which falls back to the default before the saved settings are loaded.
 -- Colors and icons stay apart from DoesItDie's: no red, gold or white fills, no skull, X, checkmark or sunglasses.
+-- The defaults are Joe's own settings of 2026-11-22.
 -- Loaded after Probe.lua.
 
 local _, ns = ...
@@ -11,16 +12,16 @@ ns.DEFAULTS = {
     -- Which HoTs
     spellRejuvenation = true, spellRegrowth = true, spellRenew = true, spellRiptide = true,
     -- Heal fill
-    healColor = "teal", healOpacity = 60, fillTexture = "flat",
-    hotColors = "single", segmentDividers = true,
+    healColor = "teal", healOpacity = 25, fillTexture = "flat",
+    hotColors = "bySpell", segmentDividers = true,
     colorRejuvenation = "teal", colorRegrowth = "green", colorRenew = "cyan", colorRiptide = "blue",
     -- Outline around the heal
-    outlineStyle = "none", dashLength = 4, outlineThickness = 1, outlineColor = "teal", outlineOpacity = 100,
+    outlineStyle = "dashed", dashLength = 4, outlineThickness = 1, outlineColor = "teal", outlineOpacity = 20,
     -- Animation and effects
     smoothMotion = true, flashOnApply = true, pulseOutline = false, showSpark = false,
     showGlow = false, glowSize = 4, showShine = false, shineInterval = 4, scrollStripes = false,
     -- Overheal
-    showOverheal = true, overhealColor = "paleBlue", overhealOpacity = 95, overhealHeight = 30,
+    showOverheal = true, overhealColor = "teal", overhealOpacity = 100, overhealHeight = 30,
     -- Tops off icon
     topOffIcon = "plus", iconSize = 100, iconPulse = false,
     -- Text

@@ -20,12 +20,15 @@ local SIMULATION_STEP = 0.5 -- seconds; one HoT tick per step
 
 -- Presets only set the look; where it shows and which HoTs count are left alone.
 local PRESETS = {
-    { id = "default", label = "Default", values = {
-        healColor = "teal", healOpacity = 60, fillTexture = "flat", hotColors = "single", outlineStyle = "none",
+    { id = "default", label = "Default", values = { -- the same as ns.DEFAULTS' look
+        healColor = "teal", healOpacity = 25, fillTexture = "flat", hotColors = "bySpell", segmentDividers = true,
+        colorRejuvenation = "teal", colorRegrowth = "green", colorRenew = "cyan", colorRiptide = "blue",
+        outlineStyle = "dashed", dashLength = 4, outlineThickness = 1, outlineColor = "teal", outlineOpacity = 20,
         smoothMotion = true, flashOnApply = true, pulseOutline = false, showSpark = false, showGlow = false,
-        showShine = false, scrollStripes = false,
-        showOverheal = true, overhealColor = "paleBlue", overhealOpacity = 95, overhealHeight = 30,
-        topOffIcon = "plus", iconSize = 100, iconPulse = false, showText = false,
+        glowSize = 4, showShine = false, shineInterval = 4, scrollStripes = false,
+        showOverheal = true, overhealColor = "teal", overhealOpacity = 100, overhealHeight = 30,
+        topOffIcon = "plus", iconSize = 100, iconPulse = false,
+        showText = false, textPosition = "left", textSize = 10, textColor = "white",
     } },
     { id = "subtle", label = "Subtle", values = {
         healColor = "green", healOpacity = 35, fillTexture = "gradient", hotColors = "single", outlineStyle = "none",
