@@ -3,6 +3,7 @@
 ## Notes: Sister addon to DoesItDie: shows how much your HoTs will still heal and whether they top the target off. /dil for commands.
 ## Author: Joe Greive
 ## Version: @project-version@
+## X-Curse-Project-ID: 1826360
 ## SavedVariables: DoesItLiveDB
 
 Probe.lua
