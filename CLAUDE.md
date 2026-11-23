@@ -14,17 +14,19 @@ The plan (feasibility, display geometry, tracking, how it stays out of DoesItDie
 
 ## Status
 
-The bars follow your HoTs (Rejuvenation, Regrowth, Renew, Riptide). Verified in-game: the bars' look on the player
-frame, friendly target frame and personal resource display, with a fixed amount (`/dil bar`). **Not** yet verified
-in-game: the tracking, and friendly nameplates (name-only plates have no bar to draw on:
-`nameplateShowOnlyNameForFriendlyPlayerUnits`). Missing: the remaining heal as text, options, Wild Growth, other
-players' HoTs.
+The bars follow your HoTs (Rejuvenation, Regrowth, Renew, Riptide), with an options window (`/dil`). Verified
+in-game: the bars on the player frame, friendly target frame and personal resource display, and the tracking (Joe,
+2026-11-22: "looks like it's working"). **Not** yet verified in-game: friendly nameplates (name-only plates have no
+bar to draw on: `nameplateShowOnlyNameForFriendlyPlayerUnits`) and the options window. Missing: Wild Growth, other
+players' HoTs, custom health bars (DoesItDie's Frames.lua and Pick mode).
 
 | File | What |
 |---|---|
 | `DoesItLive/Probe.lua` | Log, helpers shared through the addon table (`ns.out`, `ns.isSecret`...), the probe, all events and `/dil`. Loaded first |
+| `DoesItLive/Settings.lua` | `ns.DEFAULTS` (filled into `DoesItLiveDB` on load), the options' choice lists, `ns.setting(key)` |
 | `DoesItLive/Tracking.lua` | HoTs per unit (kept by GUID, else by name): casts, tooltips, timing, corrections from auras out of combat. `ns.tracking.remaining(unit)` |
-| `DoesItLive/Display.lua` | The bars and which frames they sit on. `ns.display` |
+| `DoesItLive/Display.lua` | The bars and which frames they sit on, in the settings' look; also on the options preview's mock bars (`display.setPreview`). `ns.display`; `display.settingsChanged()` after any setting change |
+| `DoesItLive/Options.lua` | The options window (`/dil`), built like DoesItDie's: live preview (mock player frame and nameplate drawn by Display.lua), tabs (Show on, Look, Icon & text, Advanced), presets, hand-built controls; plus a page in Options > AddOns that opens it |
 
 ## What the probe found (Forever 1.60.1, druid 35, 2026-11-22)
 
@@ -96,7 +98,7 @@ gold or white stripes. Own names everywhere: `/dil`, `DoesItLive*` globals, `Doe
 - **Game install:** `C:\Program Files (x86)\World of Warcraft\_forever_\`. Junction
   `Interface\AddOns\DoesItLive` to this repo's `DoesItLive/` so edits are live (`/reload`; new files need a restart).
 - **Tests:** `pip install lupa`, then `python tools/test_load.py` (loads the .toc in Lua 5.1 with a fake WoW API,
-  fires every event and command with plain and secret values) and `python tools/test_tracking.py` (scripted
+  fires every event and command with plain and secret values, opens the options window and presses every control) and `python tools/test_tracking.py` (scripted
   casts, auras and time, and Forever's HoT tooltips from DoesItDie's `tools/data/forever_spellbook.json`).
 - **Releasing:** add notes to `CHANGELOG.md`, push a `v*` tag. Add `## X-Curse-Project-ID:` to the .toc once the
   CurseForge project exists, and the `CF_API_KEY` secret to the repo.

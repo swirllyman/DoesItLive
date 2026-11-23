@@ -23,7 +23,7 @@ local fightCounts = {}
 local function out(msg, toChat)
     table.insert(log, date("%H:%M:%S") .. " " .. msg)
     if #log > MAX_LOG_LINES then table.remove(log, 1) end
-    if toChat or echo then DEFAULT_CHAT_FRAME:AddMessage("|cff66ff99DIL|r " .. msg) end
+    if toChat or echo or (db and db.echo) then DEFAULT_CHAT_FRAME:AddMessage("|cff66ff99DIL|r " .. msg) end
 end
 
 local function isSecret(v)
@@ -401,11 +401,15 @@ f:SetScript("OnEvent", function(self, event, ...)
         if ... ~= ADDON then return end
         DoesItLiveDB = DoesItLiveDB or {}
         db = DoesItLiveDB
+        ns.applyDefaults(db)
         log = db.log or log
         db.log = log
         echo = db.echo or false
-        out("Loaded (v5, HoT tracking). Type /dil for help.", true)
+        out("Loaded (v6, options window). /dil for settings, /dil help for commands.", true)
         out("Event registrations: " .. table.concat(registrations, " "))
+        local optionsOK, optionsErr = pcall(ns.registerOptions)
+        if not optionsOK then out("Options > AddOns page ERROR " .. tostring(optionsErr)) end
+        ns.display.settingsChanged()
         if C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix then
             out("ADDONMSG register prefix: " .. probe(select(2, pcall(C_ChatInfo.RegisterAddonMessagePrefix, PREFIX))))
         end
@@ -480,7 +484,9 @@ SLASH_DOESITLIVE2 = "/doesitlive"
 SlashCmdList.DOESITLIVE = function(msg)
     msg = strlower(strtrim(msg or ""))
     local cmd, arg = msg:match("^(%S*)%s*(.-)$")
-    if cmd == "probe" then
+    if cmd == "" or cmd == "options" or cmd == "config" then
+        ns.openOptions()
+    elseif cmd == "probe" then
         snapshot("manual")
     elseif cmd == "bar" then
         ns.display.setTestBar(tonumber(arg))
@@ -495,14 +501,14 @@ SlashCmdList.DOESITLIVE = function(msg)
     elseif cmd == "meter" then
         readMeter(0)
     elseif cmd == "echo" then
-        echo = not echo
+        echo = not (echo or (db and db.echo))
         if db then db.echo = echo end
         out("Echo to chat " .. (echo and "ON" or "OFF") .. ".", true)
     elseif cmd == "clear" then
         wipe(log)
         out("Log cleared.", true)
     else
-        out("DoesItLive shows your HoTs by itself. Everything is logged to SavedVariables\\DoesItLive.lua on /reload or logout.", true)
+        out("/dil - settings. DoesItLive shows your HoTs by itself. Everything is logged to SavedVariables\\DoesItLive.lua on /reload or logout.", true)
         out("/dil probe - snapshot of health, heal prediction and auras on you, your target and party", true)
         out("/dil hots - list your HoTs as tracked; /dil bar <n> - show a fixed n instead (/dil bar to go back)", true)
         out("/dil plates - turn the heal bar on friendly nameplates on or off", true)

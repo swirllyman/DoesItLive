@@ -8,6 +8,8 @@
 --     <heal> of the host; where it overlaps the green, that healing has nowhere to go
 --   tops off (plus): a fill of <heal> out of the missing health, which stops at its full width once heal >= missing;
 --     only the last icon-width of that very long bar is visible (same trick as DoesItDie's skull)
+-- What it looks like and where it shows come from the settings (Settings.lua, set in Options.lua); the options
+-- window's preview is a widget on a mock bar fed plain numbers (display.setPreview).
 -- Loaded after Tracking.lua.
 
 local _, ns = ...
@@ -23,17 +25,27 @@ local HOST_CHECK_SECONDS = 1
 local FALLBACK_WIDTH, FALLBACK_HEIGHT = 124, 15 -- when a host's size can't be read
 local MAX_LAYER_FRAMES = 300
 
+local setting = ns.setting
 local testAmount -- /dil bar <n>: shown instead of the tracked HoTs
+local previews = {} -- the options window's mock bars
+local lookVersion = 0 -- bumped when a setting changes, so each widget re-applies its look
+
+-- Which setting turns each place on.
+local PLACE_SETTING = { player = "showPlayer", personal = "showPersonal", target = "showTarget", plate = "showPlates" }
+
+local function spellShown(name)
+    return setting("spell" .. name) ~= false
+end
 
 -- The healing to show on a unit (0: nothing).
 local function amountFor(unit)
     if testAmount then return testAmount end
     if unit == nil then return 0 end
-    return ns.tracking.remaining(unit)
+    return ns.tracking.remaining(unit, spellShown)
 end
 
 local function nothingToShow()
-    return not testAmount and not ns.tracking.any()
+    return not testAmount and not ns.tracking.any() and next(previews) == nil
 end
 
 -- A plain value from region:method(), or nil if it errors or is secret.
@@ -128,9 +140,22 @@ local function createWidget(name, unit, find, parent)
         if i <= 2 then texture:SetColorTexture(0, 0.15, 0.1, 1) else texture:SetColorTexture(0.85, 1, 0.95, 1) end
         w.plus[i] = texture
     end
+    w.iconTex = w.iconBar:CreateTexture(nil, "OVERLAY", nil, 3) -- the picture icons
+    w.iconTex:SetPoint("RIGHT", w.iconFill, "RIGHT")
+    w.pulse = w.iconBar:CreateAnimationGroup()
+    w.pulse:SetLooping("BOUNCE")
+    local fade = w.pulse:CreateAnimation("Alpha")
+    fade:SetFromAlpha(1)
+    fade:SetToAlpha(0.35)
+    fade:SetDuration(0.6)
+    fade:SetSmoothing("IN_OUT")
+    -- The text isn't clipped: "above the bar" is outside it.
+    w.textLayer = CreateFrame("Frame", nil, w.root)
+    w.textLayer:SetAllPoints(w.root)
+    w.text = w.textLayer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     -- Bottom to top. Levels are set one by one: siblings at equal depth would otherwise share a level, and the
     -- overheal drew over the plus.
-    w.layers = { w.root, w.clip, w.healBar, w.strip, w.overBar, w.overClip, w.iconWindow, w.iconBar }
+    w.layers = { w.root, w.clip, w.healBar, w.strip, w.overBar, w.overClip, w.iconWindow, w.iconBar, w.textLayer }
     return w
 end
 
@@ -143,12 +168,49 @@ local widgets = {
 local function sizeIcon(w, size)
     w.iconWindow:SetSize(size, size)
     w.iconBar:SetSize(TOPS_OFF_BAR_LENGTH, size)
+    w.iconTex:SetSize(size, size)
     local long, thick = size - 4, math.max(2, math.floor(size / 5 + 0.5))
     local dims = { { long + 2, thick + 2 }, { thick + 2, long + 2 }, { long, thick }, { thick, long } }
     for i, texture in ipairs(w.plus) do
         texture:SetSize(dims[i][1], dims[i][2])
         texture:ClearAllPoints()
         texture:SetPoint("CENTER", w.iconFill, "RIGHT", -size / 2, 0)
+    end
+end
+
+local FONT_FALLBACK = "Fonts\\FRIZQT__.TTF"
+
+-- Colors, opacities, icon and text from the settings. Sizes that depend on the host are set in attach.
+local function applyLook(w)
+    w.lookVersion = lookVersion
+    local r, g, b = ns.colorOf("healColor")
+    w.healTex:SetColorTexture(r, g, b, setting("healOpacity") / 100)
+    r, g, b = ns.colorOf("overhealColor")
+    w.overTex:SetColorTexture(r, g, b, setting("overhealOpacity") / 100)
+    w.strip:SetShown(setting("showOverheal"))
+    local icon = ns.findEntry(ns.lists.icons, setting("topOffIcon"))
+    for _, texture in ipairs(w.plus) do texture:SetShown(icon.id == "plus") end
+    w.iconTex:SetShown(icon.path ~= nil)
+    if icon.path then w.iconTex:SetTexture(icon.path) end
+    w.iconWindow:SetShown(icon.id ~= "none")
+    if setting("iconPulse") and icon.id ~= "none" then w.pulse:Play() else w.pulse:Stop() end
+    local fontOK, font = pcall(function() return (GameFontHighlightSmall:GetFont()) end)
+    w.text:SetFont(fontOK and type(font) == "string" and font or FONT_FALLBACK, setting("textSize"), "OUTLINE")
+    w.text:SetTextColor(ns.colorOf("textColor", ns.lists.textColors))
+    w.textLayer:SetShown(setting("showText"))
+end
+
+local function placeText(w, area)
+    w.text:ClearAllPoints()
+    local position = setting("textPosition")
+    if position == "center" then
+        w.text:SetPoint("CENTER", area, "CENTER")
+    elseif position == "right" then
+        w.text:SetPoint("RIGHT", w.iconWindow, "LEFT", -2, 0)
+    elseif position == "above" then
+        w.text:SetPoint("BOTTOMRIGHT", area, "TOPRIGHT", 0, 2)
+    else
+        w.text:SetPoint("LEFT", area, "LEFT", 4, 0)
     end
 end
 
@@ -189,6 +251,13 @@ end
 
 local function updateLayer(w, frame)
     local ok, err = pcall(function()
+        if w.preview then -- above the options window
+            for i, layer in ipairs(w.layers) do
+                layer:SetFrameStrata("FULLSCREEN")
+                layer:SetFrameLevel(10 + i)
+            end
+            return
+        end
         if w.plate then -- as in DoesItDie: the plate's strata, above its health bar
             local strata, level = plain(w.plate, "GetFrameStrata"), plain(w.bar, "GetFrameLevel")
             for i, layer in ipairs(w.layers) do
@@ -232,10 +301,10 @@ local function attach(w, bar, area, mask, path)
     local height = readHeight or w.lastHeight or FALLBACK_HEIGHT
     w.lastWidth, w.lastHeight = width, height
     local areaHeight = plainSize(area, "GetHeight") or height
-    local stripHeight = math.max(3, math.floor(areaHeight * 0.3 + 0.5))
+    local stripHeight = math.max(2, math.floor(areaHeight * setting("overhealHeight") / 100 + 0.5))
     local scale = plainSize(bar, "GetEffectiveScale") or 1
     local uiScale = plainSize(w.plate or UIParent, "GetEffectiveScale") or 1
-    local signature = table.concat({ path, width, height, areaHeight, scale, uiScale }, "|")
+    local signature = table.concat({ path, width, height, areaHeight, scale, uiScale, lookVersion }, "|")
     if w.bar == bar and w.signature == signature then return true end
     local ok, err = pcall(function()
         local green = bar:GetStatusBarTexture()
@@ -262,7 +331,8 @@ local function attach(w, bar, area, mask, path)
 
         w.iconWindow:ClearAllPoints()
         w.iconWindow:SetPoint("RIGHT", area, "RIGHT", -1, 0)
-        sizeIcon(w, math.max(8, math.floor(math.min(areaHeight, 18))))
+        sizeIcon(w, math.max(6, math.floor(math.min(areaHeight, 18) * setting("iconSize") / 100)))
+        placeText(w, area)
     end)
     if ok and w.mask ~= mask then
         local maskOK, maskErr = pcall(function()
@@ -318,6 +388,7 @@ end
 
 -- Only units you can assist: enemies are DoesItDie's.
 local function canShow(unit)
+    if unit == "preview" then return true end
     if unit == nil then return false end
     if unit == "player" then return true end
     local ok, assist = pcall(UnitCanAssist, "player", unit)
@@ -358,8 +429,10 @@ local function logPlacement(w)
 end
 
 local function updateWidget(w)
-    local amount = amountFor(w.unit)
-    local hidden = amount <= 0 and "hidden, nothing to heal"
+    local amount = w.preview and w.preview.amount() or amountFor(w.unit)
+    local place = PLACE_SETTING[w.name]
+    local hidden = place and not setting(place) and "hidden, turned off in the options"
+        or amount <= 0 and "hidden, nothing to heal"
         or not w.attached and "hidden, not attached"
         or not canShow(w.unit) and "hidden, unit not friendly"
         or plain(w.bar, "IsVisible") == false and "hidden, its health bar isn't visible"
@@ -368,14 +441,21 @@ local function updateWidget(w)
         setState(w, hidden)
         return
     end
+    if w.lookVersion ~= lookVersion then applyLook(w) end
     local ok, err = pcall(function()
-        local maxHealth = UnitHealthMax(w.unit)
+        local maxHealth, missing
+        if w.preview then
+            maxHealth, missing = w.preview.max(), w.preview.max() - w.preview.health()
+        else
+            maxHealth, missing = UnitHealthMax(w.unit), UnitHealthMissing(w.unit)
+        end
+        w.text:SetText(string.format("+%d", math.floor(amount + 0.5)))
         w.healBar:SetMinMaxValues(0, maxHealth)
         w.healBar:SetValue(amount)
         w.overBar:SetMinMaxValues(0, maxHealth)
         w.overBar:SetValue(amount)
         -- From -1, so full health (nothing missing) is still a range to fill, and counts as topped off.
-        w.iconBar:SetMinMaxValues(-1, UnitHealthMissing(w.unit))
+        w.iconBar:SetMinMaxValues(-1, missing)
         w.iconBar:SetValue(amount)
         if not w.plate then w.root:SetAlpha(plain(w.bar, "GetEffectiveAlpha") or 1) end
     end)
@@ -396,8 +476,7 @@ local failedPlates = {} -- nameplate unit -> true: nothing to draw on, don't try
 local plateLogLines, platePlacementLogged = 0, false
 
 local function platesWanted()
-    local db = ns.db()
-    return not nothingToShow() and not (db and db.plates == false)
+    return not nothingToShow() and setting("showPlates") and true or false
 end
 
 local function plateHealthBar(plate)
@@ -507,6 +586,7 @@ local function hideAll()
         setState(w, "hidden, nothing to heal")
     end
     for unit in pairs(activePlates) do releasePlate(unit) end
+    for _, w in pairs(previews) do w.root:Hide() end
 end
 
 local driver = CreateFrame("Frame")
@@ -536,6 +616,7 @@ driver:SetScript("OnUpdate", function(_, elapsed)
         if check then checkHost(w) end
         updateWidget(w)
     end
+    for _, w in pairs(previews) do updateWidget(w) end
 end)
 
 function display.onTargetChanged()
@@ -562,6 +643,43 @@ function display.refresh()
     end
     refreshPlates()
     for _, w in pairs(activePlates) do updateWidget(w) end
+    for _, w in pairs(previews) do
+        checkHost(w)
+        updateWidget(w)
+    end
+end
+
+-- A setting changed: every widget re-applies its look and re-lays itself over its host.
+function display.settingsChanged()
+    lookVersion = lookVersion + 1
+    for unit in pairs(failedPlates) do failedPlates[unit] = nil end
+    if not setting("showPlates") then
+        for unit in pairs(activePlates) do releasePlate(unit) end
+    end
+    display.refresh()
+end
+
+local previewWidgets = {} -- by name, kept between openings of the window
+
+-- The options window's preview: name -> { bar, area, health(), max(), amount() } of plain numbers, or nil to stop.
+function display.setPreview(name, host)
+    local w = previewWidgets[name]
+    if not host then
+        previews[name] = nil
+        if w then w.root:Hide() end
+        display.refresh()
+        return
+    end
+    if not w then
+        w = createWidget("preview " .. name, "preview", nil, nil)
+        w.quiet = true
+        previewWidgets[name] = w
+    end
+    w.preview = host
+    w.find = function() return host.bar, host.area or host.bar, nil, "options preview " .. name, nil end
+    w.signature = nil
+    previews[name] = w
+    display.refresh()
 end
 
 function display.onPlateAdded(unit)
@@ -597,7 +715,7 @@ end
 function display.togglePlates()
     local db = ns.db()
     if not db then return end
-    db.plates = db.plates == false
-    out("Heal bar on friendly nameplates " .. (db.plates and "ON" or "OFF") .. ".", true)
-    refreshPlates()
+    db.showPlates = not setting("showPlates")
+    out("Heal bar on friendly nameplates " .. (db.showPlates and "ON" or "OFF") .. ".", true)
+    display.settingsChanged()
 end

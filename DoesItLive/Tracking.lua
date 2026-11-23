@@ -174,13 +174,16 @@ function tracking.any()
     return hotCount > 0
 end
 
--- Healing your HoTs still have to do on this unit (0 if none).
-function tracking.remaining(unit)
+-- Healing your HoTs still have to do on this unit (0 if none). shown(spell name), if given, leaves out the HoTs
+-- it says no to (turned off in the options).
+function tracking.remaining(unit, shown)
     if hotCount == 0 then return 0 end
     local guidKey, nameKey = keysOf(unit)
     local now, sum = GetTime(), 0
     for _, key in ipairs({ guidKey or false, nameKey or false }) do
-        for _, hot in pairs(key and hotsByKey[key] or {}) do sum = sum + remainingOf(hot, now) end
+        for name, hot in pairs(key and hotsByKey[key] or {}) do
+            if not shown or shown(name) then sum = sum + remainingOf(hot, now) end
+        end
     end
     return sum
 end

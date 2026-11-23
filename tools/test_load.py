@@ -18,12 +18,15 @@ local function newObject()
     setmetatable(o, { __index = function(t, k)
         return function(self, ...)
             if k == "GetChildren" then return nil
-            elseif k == "GetStatusBarTexture" or k == "CreateTexture" or k == "CreateAnimationGroup" or k == "CreateAnimation" then
+            elseif k == "GetStatusBarTexture" or k == "CreateTexture" or k == "CreateAnimationGroup" or k == "CreateAnimation"
+                or k == "CreateFontString" or k == "CreateMaskTexture" or k == "GetThumbTexture" then
                 return newObject()
             elseif k == "GetWidth" or k == "GetHeight" then return 100
             elseif k == "GetFrameLevel" then return 3
             elseif k == "GetFrameStrata" then return "MEDIUM"
             elseif k == "GetName" then return nil
+            elseif k == "GetStringWidth" then return 40
+            elseif k == "GetFont" then return "Fonts\\FRIZQT__.TTF", 10
             end
         end
     end })
@@ -43,6 +46,7 @@ function CreateFrame(kind, name, parent)
     rawset(f, "RegisterEvent", function(self, e) end)
     rawset(f, "_scripts", scripts)
     frames[#frames + 1] = f
+    if name then _G[name] = f end
     return f
 end
 function fireEvent(event, ...)
@@ -96,7 +100,24 @@ function wipe(t) for k in pairs(t) do t[k] = nil end return t end
 function strlower(s) return string.lower(s) end
 function strtrim(s) return (s:gsub("^%s+", ""):gsub("%s+$", "")) end
 timers = {}
-C_Timer = { After = function(d, fn) timers[#timers + 1] = fn end }
+tickers = {}
+C_Timer = { After = function(d, fn) timers[#timers + 1] = fn end,
+            NewTicker = function(d, fn)
+                local ticker = { fn = fn, Cancel = function(self) self.cancelled = true end }
+                tickers[#tickers + 1] = ticker
+                return ticker
+            end }
+function runTickers(times)
+    for _ = 1, times do
+        for _, ticker in ipairs(tickers) do if not ticker.cancelled then ticker.fn() end end
+    end
+end
+UISpecialFrames = {}
+GameTooltip = CreateFrame("Frame")
+SettingsPanel = CreateFrame("Frame")
+categories = {}
+Settings = { RegisterCanvasLayoutCategory = function(panel, name) return { panel = panel, name = name } end,
+             RegisterAddOnCategory = function(category) categories[#categories + 1] = category end }
 function runTimers()
     local list = timers
     timers = {}
@@ -166,7 +187,7 @@ def main():
     script = r"""
     fireEvent("ADDON_LOADED", "DoesItLive")
     local cmd = SlashCmdList.DOESITLIVE
-    cmd("") cmd("probe") cmd("bar 800") tick(0.2) tick(1.1) runTimers() cmd("bar") cmd("bar 0") cmd("msg") cmd("meter") cmd("echo") cmd("echo")
+    cmd("help") cmd("probe") cmd("bar 800") tick(0.2) tick(1.1) runTimers() cmd("bar") cmd("bar 0") cmd("msg") cmd("meter") cmd("echo") cmd("echo")
     fireEvent("UNIT_SPELLCAST_SENT", "player", "Pal", "cast-1", 774)
     fireEvent("UNIT_SPELLCAST_SUCCEEDED", "player", "cast-1", 774)
     fireEvent("UNIT_COMBAT", "party1", "HEAL", "", 65, 8)
@@ -199,15 +220,15 @@ def main():
     assert(targetRoot().strata == "MEDIUM" and targetRoot().level > 1001, "not above the target frame")
     local levels, seen = 0, {}
     for _, f in ipairs(allFrames) do
-        if rawget(f, "strata") and f.strata ~= "LOW" then
-            assert(f.strata == "MEDIUM" and f.level > 1001, "below the unit frames")
+        if rawget(f, "strata") and rawget(f, "level") and f.strata ~= "LOW" then
+            assert(f.strata == "MEDIUM" and f.level > 1001, "below the unit frames: " .. tostring(f.strata) .. "/" .. tostring(f.level))
             seen[f.level] = (seen[f.level] or 0) + 1
         end
     end
     for level, count in pairs(seen) do
         assert(count == 3, "level " .. level .. " used " .. count .. " times") levels = levels + 1 -- once per widget
     end
-    assert(levels == 8, "layers: " .. levels)
+    assert(levels == 9, "layers: " .. levels)
     friendlyTarget = true fireEvent("PLAYER_TARGET_CHANGED") assert(targetShown() == true, "hidden on a friend")
     friendlyTarget = "secret" tick(0.2) assert(targetShown() == false, "shown on an unreadable target")
     friendlyTarget = true tick(0.2) assert(targetShown() == true, "not shown again")
@@ -246,6 +267,31 @@ def main():
     inCombat = false secretHealth = false
     fireEvent("PLAYER_REGEN_ENABLED")
     runTimers() runTimers()
+    -- The options window: open it, press every button, slider and menu entry in it, simulate, close it.
+    assert(#categories == 1 and categories[1].name == "DoesItLive", "no Options > AddOns page")
+    local before = #allFrames
+    cmd("")
+    assert(_G.DoesItLiveOptions, "no options window")
+    assert(#allFrames > before + 50, "window has few frames: " .. (#allFrames - before))
+    local pressed = {}
+    for _ = 1, 3 do -- menus make new buttons: go round again
+        local list = {}
+        for i = before + 1, #allFrames do list[#list + 1] = allFrames[i] end
+        for _, f in ipairs(list) do
+            if not pressed[f] then
+                pressed[f] = true
+                local s = f._scripts
+                if s.OnClick then s.OnClick(f, "LeftButton") end
+                if s.OnValueChanged then s.OnValueChanged(f, 37) end
+                if s.OnMouseWheel then s.OnMouseWheel(f, 1) end
+                if s.OnEnter then s.OnEnter(f) s.OnLeave(f) end
+            end
+        end
+    end
+    runTickers(12) runTimers()
+    tick(0.2) tick(1.1)
+    cmd("") -- closes it
+    cmd("help")
     fireEvent("PLAYER_LOGOUT")
     return #DoesItLiveDB.log
     """
@@ -253,7 +299,8 @@ def main():
     log = lua.eval("DoesItLiveDB.log")
     text = "\n".join(log[i] for i in range(1, len(log) + 1))
     for needle in ["SNAPSHOT (manual)", "BAR attach player to", "BAR attach personal to", "BAR attach target to", "BAR target layer: above MEDIUM/1001", "BAR player layer: above MEDIUM/1001 (found LOW/20", "BAR player iconWindow: ",
-                   "BAR target state: hidden, unit not friendly", "BAR target state: shown",
+                   "BAR target state: hidden, unit not friendly", "All settings reset.",
+                   "Bold preset applied.", "Heal bar on friendly nameplates OFF", "BAR target state: shown",
                    "PLATE nameplate1 plate ok, bar UnitFrame.healthBar", "PLATE nameplate3 plate not reachable (forbidden)",
                    "PLATE nameplate4 plate forbidden", "PLATE nameplate5 plate ok, bar not reachable",
                    "friendly nameplates OFF", "friendly nameplates ON",

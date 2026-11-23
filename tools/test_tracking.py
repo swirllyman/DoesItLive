@@ -201,6 +201,12 @@ fireEvent("NAME_PLATE_UNIT_REMOVED", "nameplate1") expect("plate gone", plateRoo
 fireEvent("NAME_PLATE_UNIT_ADDED", "nameplate1") expect("plate back", plateRoot.shown, true)
 SlashCmdList.DOESITLIVE("plates") wait(0.3) expect("plates off", plateRoot.shown, false)
 SlashCmdList.DOESITLIVE("plates") wait(0.3) expect("plates on", plateRoot.shown, true)
+-- Settings: a place turned off, a spell left out, then back.
+DoesItLiveDB.showPlates = false NS.display.settingsChanged() wait(0.3) expect("plates setting off", plateRoot.shown, false)
+DoesItLiveDB.showPlates = true NS.display.settingsChanged() wait(0.3) expect("plates setting on", plateRoot.shown, true)
+DoesItLiveDB.spellRenew = false NS.display.settingsChanged() wait(0.3) expect("Renew left out", plateRoot.shown, false)
+expect("still tracked", left("party1"), 830)
+DoesItLiveDB.spellRenew = true NS.display.settingsChanged() wait(0.3) expect("Renew back", plateRoot.shown, true)
 wait(16) expect("nameplate after", plateRoot.shown, false)
 -- The manual override, and back to the HoTs.
 SlashCmdList.DOESITLIVE("bar 800") expect("override", playerRoot.shown, true)
@@ -231,6 +237,7 @@ def main():
     lua.execute(SETUP)
     ns = test_load.load_addon(lua)
     lua.globals().T = ns.tracking
+    lua.globals().NS = ns
     lua.execute('fireEvent("ADDON_LOADED", "DoesItLive")')
     for desc, total, seconds in TOOLTIPS:
         result = ns.tracking.parseHot(desc)

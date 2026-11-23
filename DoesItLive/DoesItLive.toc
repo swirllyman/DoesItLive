@@ -6,5 +6,7 @@
 ## SavedVariables: DoesItLiveDB
 
 Probe.lua
+Settings.lua
 Tracking.lua
 Display.lua
+Options.lua
