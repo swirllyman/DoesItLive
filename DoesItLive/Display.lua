@@ -21,6 +21,11 @@ local display = {}
 ns.display = display
 
 local TOPS_OFF_BAR_LENGTH = 10000
+local TEXTURE_DIR = "Interface\\AddOns\\DoesItLive\\Textures\\" -- made by tools/make_textures.py
+local MAX_SEGMENTS = 4 -- one per HoT spell
+local SMOOTH_RATE = 10 -- how fast the bar glides to a new value (higher = snappier)
+local STRIPE_SCROLL_PERIOD = 8 -- px; the stripes repeat every 8px
+local SHINE_WIDTH, SHINE_DURATION = 24, 0.9
 local HOST_CHECK_SECONDS = 1
 local FALLBACK_WIDTH, FALLBACK_HEIGHT = 124, 15 -- when a host's size can't be read
 local MAX_LAYER_FRAMES = 300
@@ -37,11 +42,11 @@ local function spellShown(name)
     return setting("spell" .. name) ~= false
 end
 
--- The healing to show on a unit (0: nothing).
+-- The healing to show on a unit (0: nothing), and per HoT ({ name, amount } list, or nil).
 local function amountFor(unit)
-    if testAmount then return testAmount end
-    if unit == nil then return 0 end
-    return ns.tracking.remaining(unit, spellShown)
+    if testAmount then return testAmount, nil end
+    if unit == nil then return 0, nil end
+    return ns.tracking.breakdown(unit, spellShown)
 end
 
 local function nothingToShow()
@@ -117,6 +122,132 @@ local function createWidget(name, unit, find, parent)
     w.healTex:SetColorTexture(0.3, 1, 0.8, 0.6)
     w.healTex:SetPoint("TOPLEFT", w.healFill, "TOPLEFT")
     w.healTex:SetPoint("BOTTOMRIGHT", w.healFill, "BOTTOMRIGHT")
+    w.maskable = { w.healTex } -- every texture drawn inside the bar (the player and target bars are masked)
+
+    -- A color per HoT: running-total bars (bar i filled to HoT 1 + ... + HoT i), each segment drawn from the end of
+    -- the one before to the end of its own, so it's exactly that HoT's share on the (secret) health scale.
+    w.segments = {}
+    for i = 1, MAX_SEGMENTS do
+        local bar, fillEnd = makeInvisibleBar(w.clip)
+        local texture = w.healBar:CreateTexture(nil, "ARTWORK", nil, 1)
+        texture:SetPoint("TOPLEFT", i == 1 and w.healFill or w.segments[i - 1].fillEnd, i == 1 and "TOPLEFT" or "TOPRIGHT")
+        texture:SetPoint("BOTTOMRIGHT", fillEnd, "BOTTOMRIGHT")
+        texture:Hide()
+        local divider = w.healBar:CreateTexture(nil, "OVERLAY", nil, 1)
+        divider:SetColorTexture(0, 0, 0, 0.85)
+        divider:SetWidth(1)
+        divider:SetPoint("TOP", fillEnd, "TOPRIGHT")
+        divider:SetPoint("BOTTOM", fillEnd, "BOTTOMRIGHT")
+        divider:Hide()
+        w.segments[i] = { bar = bar, fillEnd = fillEnd, texture = texture, divider = divider }
+        w.maskable[#w.maskable + 1] = texture
+        w.maskable[#w.maskable + 1] = divider
+    end
+
+    -- Clipped to the heal: scrolling stripes and the shine sweep move across the whole bar but only show there.
+    w.spanClip = CreateFrame("Frame", nil, w.clip)
+    w.spanClip:SetPoint("TOPLEFT", w.healFill, "TOPLEFT")
+    w.spanClip:SetPoint("BOTTOMRIGHT", w.healFill, "BOTTOMRIGHT")
+    w.spanClip:SetClipsChildren(true)
+    w.stripes = w.spanClip:CreateTexture(nil, "ARTWORK")
+    w.stripes:SetTexture(TEXTURE_DIR .. "Stripes", "REPEAT", "REPEAT")
+    w.stripes:SetHorizTile(true)
+    w.stripes:SetVertTile(true)
+    w.stripeScroll = w.stripes:CreateAnimationGroup()
+    w.stripeScroll:SetLooping("REPEAT")
+    local stripeMove = w.stripeScroll:CreateAnimation("Translation")
+    stripeMove:SetOffset(STRIPE_SCROLL_PERIOD, 0)
+    stripeMove:SetDuration(0.6)
+    w.shine = w.spanClip:CreateTexture(nil, "OVERLAY")
+    w.shine:SetTexture(TEXTURE_DIR .. "Shine")
+    w.shine:SetBlendMode("ADD")
+    w.shine:SetWidth(SHINE_WIDTH)
+    w.shineSweep = w.shine:CreateAnimationGroup()
+    w.shineSweep:SetLooping("REPEAT")
+    w.shineMove = w.shineSweep:CreateAnimation("Translation")
+    w.shineMove:SetDuration(SHINE_DURATION)
+    w.shineMove:SetSmoothing("IN_OUT")
+    w.maskable[#w.maskable + 1] = w.stripes
+    w.maskable[#w.maskable + 1] = w.shine
+
+    -- Outline, inner glow, flash and spark, around the heal span. The glow fades inward: outside the span it would
+    -- be clipped away by the bar's edges.
+    w.effects = CreateFrame("Frame", nil, w.clip)
+    w.effects:SetAllPoints(w.clip)
+    w.edges, w.glows = {}, {}
+    local function edge(horizontal, point1, point2)
+        local texture = w.effects:CreateTexture(nil, "OVERLAY", nil, 7)
+        texture:SetPoint(point1, w.healFill, point1)
+        texture:SetPoint(point2, w.healFill, point2)
+        w.edges[#w.edges + 1] = { texture = texture, horizontal = horizontal }
+        w.maskable[#w.maskable + 1] = texture
+    end
+    edge(true, "TOPLEFT", "TOPRIGHT")
+    edge(true, "BOTTOMLEFT", "BOTTOMRIGHT")
+    edge(false, "TOPLEFT", "BOTTOMLEFT")
+    edge(false, "TOPRIGHT", "BOTTOMRIGHT")
+    for _, side in ipairs({ "TOP", "BOTTOM", "LEFT", "RIGHT" }) do
+        local texture = w.effects:CreateTexture(nil, "BORDER")
+        texture:SetTexture(WHITE)
+        texture:SetBlendMode("ADD")
+        if side == "TOP" or side == "BOTTOM" then
+            texture:SetPoint(side .. "LEFT", w.healFill, side .. "LEFT")
+            texture:SetPoint(side .. "RIGHT", w.healFill, side .. "RIGHT")
+        else
+            texture:SetPoint("TOP" .. side, w.healFill, "TOP" .. side)
+            texture:SetPoint("BOTTOM" .. side, w.healFill, "BOTTOM" .. side)
+        end
+        w.glows[#w.glows + 1] = { texture = texture, side = side }
+        w.maskable[#w.maskable + 1] = texture
+    end
+    w.outlinePulse = w.effects:CreateAnimationGroup()
+    w.outlinePulse:SetLooping("BOUNCE")
+    local pulseAlpha = w.outlinePulse:CreateAnimation("Alpha")
+    pulseAlpha:SetFromAlpha(1)
+    pulseAlpha:SetToAlpha(0.3)
+    pulseAlpha:SetDuration(0.9)
+    pulseAlpha:SetSmoothing("IN_OUT")
+
+    w.flash = w.effects:CreateTexture(nil, "OVERLAY")
+    w.flash:SetPoint("TOPLEFT", w.healFill, "TOPLEFT")
+    w.flash:SetPoint("BOTTOMRIGHT", w.healFill, "BOTTOMRIGHT")
+    w.flash:SetColorTexture(1, 1, 1, 1)
+    w.flash:SetBlendMode("ADD")
+    w.flash:SetAlpha(0)
+    w.flashAnim = w.flash:CreateAnimationGroup()
+    local flashIn = w.flashAnim:CreateAnimation("Alpha")
+    flashIn:SetFromAlpha(0)
+    flashIn:SetToAlpha(0.7)
+    flashIn:SetDuration(0.08)
+    flashIn:SetOrder(1)
+    local flashOut = w.flashAnim:CreateAnimation("Alpha")
+    flashOut:SetFromAlpha(0.7)
+    flashOut:SetToAlpha(0)
+    flashOut:SetDuration(0.5)
+    flashOut:SetSmoothing("OUT")
+    flashOut:SetOrder(2)
+    w.maskable[#w.maskable + 1] = w.flash
+
+    w.spark = w.effects:CreateTexture(nil, "OVERLAY", nil, 6)
+    w.spark:SetTexture(TEXTURE_DIR .. "Spark")
+    w.spark:SetBlendMode("ADD")
+    w.spark:SetWidth(12)
+    w.spark:SetPoint("TOP", w.healFill, "TOPRIGHT")
+    w.spark:SetPoint("BOTTOM", w.healFill, "BOTTOMRIGHT")
+    w.spark:SetAlpha(0)
+    w.sparkPunch = w.spark:CreateAnimationGroup()
+    local sparkIn = w.sparkPunch:CreateAnimation("Alpha")
+    sparkIn:SetFromAlpha(0)
+    sparkIn:SetToAlpha(1)
+    sparkIn:SetDuration(0.08)
+    sparkIn:SetOrder(1)
+    local sparkOut = w.sparkPunch:CreateAnimation("Alpha")
+    sparkOut:SetFromAlpha(1)
+    sparkOut:SetToAlpha(0)
+    sparkOut:SetDuration(0.45)
+    sparkOut:SetSmoothing("OUT")
+    sparkOut:SetOrder(2)
+    w.maskable[#w.maskable + 1] = w.spark
 
     w.strip = CreateFrame("Frame", nil, w.clip) -- the bottom of the visible area, for the overheal
     w.strip:SetClipsChildren(true)
@@ -128,6 +259,7 @@ local function createWidget(name, unit, find, parent)
     w.overClip:SetClipsChildren(true)
     w.overTex = w.overClip:CreateTexture(nil, "ARTWORK")
     w.overTex:SetColorTexture(0.65, 0.85, 1, 0.95)
+    w.maskable[#w.maskable + 1] = w.overTex
 
     w.iconWindow = CreateFrame("Frame", nil, w.clip)
     w.iconWindow:SetClipsChildren(true)
@@ -155,7 +287,8 @@ local function createWidget(name, unit, find, parent)
     w.text = w.textLayer:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     -- Bottom to top. Levels are set one by one: siblings at equal depth would otherwise share a level, and the
     -- overheal drew over the plus.
-    w.layers = { w.root, w.clip, w.healBar, w.strip, w.overBar, w.overClip, w.iconWindow, w.iconBar, w.textLayer }
+    w.layers = { w.root, w.clip, w.healBar, w.spanClip, w.effects, w.strip, w.overBar, w.overClip, w.iconWindow,
+        w.iconBar, w.textLayer }
     return w
 end
 
@@ -181,10 +314,96 @@ end
 local FONT_FALLBACK = "Fonts\\FRIZQT__.TTF"
 
 -- Colors, opacities, icon and text from the settings. Sizes that depend on the host are set in attach.
+local function setFill(texture, fill, r, g, b, a)
+    texture:SetTexture(fill.path, fill.tiled and "REPEAT" or nil, fill.tiled and "REPEAT" or nil)
+    texture:SetHorizTile(fill.tiled or false)
+    texture:SetVertTile(fill.tiled or false)
+    if fill.gradient and CreateColor then
+        texture:SetVertexColor(1, 1, 1, 1)
+        local ok = pcall(texture.SetGradient, texture, "HORIZONTAL", CreateColor(r, g, b, 0), CreateColor(r, g, b, a))
+        if not ok then texture:SetVertexColor(r, g, b, a) end
+    else
+        texture:SetVertexColor(r, g, b, a)
+    end
+end
+
 local function applyLook(w)
     w.lookVersion = lookVersion
     local r, g, b = ns.colorOf("healColor")
-    w.healTex:SetColorTexture(r, g, b, setting("healOpacity") / 100)
+    local opacity = setting("healOpacity") / 100
+    local fill = ns.findEntry(ns.lists.fills, setting("fillTexture"))
+    local bySpell = setting("hotColors") == "bySpell"
+    -- Scrolling stripes are drawn by the moving texture in the span clip instead of the fill.
+    local scrolling = fill.id == "stripes" and setting("scrollStripes") and not bySpell
+    setFill(w.healTex, fill, r, g, b, opacity)
+    w.healTex:SetShown(not bySpell and not scrolling)
+    w.stripes:SetVertexColor(r, g, b, opacity)
+    w.stripes:SetShown(scrolling)
+    if scrolling then w.stripeScroll:Play() else w.stripeScroll:Stop() end
+    -- Segments take the fill's texture, flat if it fades (the fade belongs to the whole heal).
+    local segmentFill = fill.gradient and ns.lists.fills[1] or fill
+    for _, segment in ipairs(w.segments) do
+        segment.fill = segmentFill
+        segment.texture:SetTexture(segmentFill.path, segmentFill.tiled and "REPEAT" or nil,
+            segmentFill.tiled and "REPEAT" or nil)
+        segment.texture:SetHorizTile(segmentFill.tiled or false)
+        segment.texture:SetVertTile(segmentFill.tiled or false)
+        if not bySpell then
+            segment.texture:Hide()
+            segment.divider:Hide()
+        end
+    end
+
+    -- Outline
+    local style = setting("outlineStyle")
+    local or_, og, ob = ns.colorOf("outlineColor")
+    local oa = setting("outlineOpacity") / 100
+    for _, e in ipairs(w.edges) do
+        local texture = e.texture
+        if style == "dashed" then
+            texture:SetTexture(TEXTURE_DIR .. (e.horizontal and "DashH" or "DashV") .. setting("dashLength"), "REPEAT", "REPEAT")
+            texture:SetHorizTile(e.horizontal)
+            texture:SetVertTile(not e.horizontal)
+        else
+            texture:SetTexture(WHITE)
+            texture:SetHorizTile(false)
+            texture:SetVertTile(false)
+        end
+        texture:SetVertexColor(or_, og, ob, oa)
+        if e.horizontal then texture:SetHeight(setting("outlineThickness")) else texture:SetWidth(setting("outlineThickness")) end
+        texture:SetShown(style ~= "none")
+    end
+    if setting("pulseOutline") then w.outlinePulse:Play() else w.outlinePulse:Stop() end
+
+    -- Inner glow, in the outline color (the heal color without an outline)
+    local gr, gg, gb = or_, og, ob
+    if style == "none" then gr, gg, gb = r, g, b end
+    local size = setting("glowSize")
+    for _, glow in ipairs(w.glows) do
+        local texture = glow.texture
+        local inner, outer = CreateColor and CreateColor(gr, gg, gb, 0.7), CreateColor and CreateColor(gr, gg, gb, 0)
+        if glow.side == "TOP" or glow.side == "BOTTOM" then texture:SetHeight(size) else texture:SetWidth(size) end
+        if inner then
+            if glow.side == "TOP" then pcall(texture.SetGradient, texture, "VERTICAL", outer, inner)
+            elseif glow.side == "BOTTOM" then pcall(texture.SetGradient, texture, "VERTICAL", inner, outer)
+            elseif glow.side == "LEFT" then pcall(texture.SetGradient, texture, "HORIZONTAL", inner, outer)
+            else pcall(texture.SetGradient, texture, "HORIZONTAL", outer, inner) end
+        end
+        texture:SetShown(setting("showGlow"))
+    end
+
+    w.spark:SetVertexColor(math.min(1, r + 0.4), math.min(1, g + 0.4), math.min(1, b + 0.4), 1)
+    w.spark:SetShown(setting("showSpark"))
+
+    -- Shine sweep: from just left of the bar across it, then waits out the rest of the interval.
+    w.shineSweep:Stop()
+    w.shine:SetShown(setting("showShine"))
+    if setting("showShine") then
+        w.shineMove:SetOffset((w.lastWidth or FALLBACK_WIDTH) + SHINE_WIDTH, 0)
+        w.shineMove:SetStartDelay(math.max(0, setting("shineInterval") - SHINE_DURATION))
+        w.shineSweep:Play()
+    end
+
     r, g, b = ns.colorOf("overhealColor")
     w.overTex:SetColorTexture(r, g, b, setting("overhealOpacity") / 100)
     w.strip:SetShown(setting("showOverheal"))
@@ -318,6 +537,18 @@ local function attach(w, bar, area, mask, path)
         w.healBar:SetPoint("TOPLEFT", green, "TOPRIGHT")
         w.healBar:SetPoint("BOTTOMLEFT", green, "BOTTOMRIGHT")
         w.healBar:SetWidth(width)
+        for _, segment in ipairs(w.segments) do
+            segment.bar:ClearAllPoints()
+            segment.bar:SetPoint("TOPLEFT", green, "TOPRIGHT")
+            segment.bar:SetPoint("BOTTOMLEFT", green, "BOTTOMRIGHT")
+            segment.bar:SetWidth(width)
+        end
+        w.stripes:ClearAllPoints()
+        w.stripes:SetPoint("TOPLEFT", bar, "TOPLEFT", -STRIPE_SCROLL_PERIOD * 2, 0)
+        w.stripes:SetPoint("BOTTOMRIGHT", bar, "BOTTOMRIGHT")
+        w.shine:ClearAllPoints()
+        w.shine:SetPoint("TOPRIGHT", bar, "TOPLEFT")
+        w.shine:SetPoint("BOTTOMRIGHT", bar, "BOTTOMLEFT")
 
         w.strip:ClearAllPoints()
         w.strip:SetPoint("BOTTOMLEFT", area, "BOTTOMLEFT")
@@ -336,7 +567,7 @@ local function attach(w, bar, area, mask, path)
     end)
     if ok and w.mask ~= mask then
         local maskOK, maskErr = pcall(function()
-            for _, texture in ipairs({ w.healTex, w.overTex }) do
+            for _, texture in ipairs(w.maskable) do
                 if w.mask then texture:RemoveMaskTexture(w.mask) end
                 if mask then texture:AddMaskTexture(mask) end
             end
@@ -428,8 +659,32 @@ local function logPlacement(w)
     end)
 end
 
+local animating = false -- some bar is still gliding: the driver then updates every frame
+
+-- The amount drawn: glides toward the real one with "Smooth motion" (and grows in from nothing).
+local function smoothed(w, target)
+    local now = GetTime()
+    local elapsed = now - (w.lastStep or now)
+    w.lastStep = now
+    if not setting("smoothMotion") then
+        w.shownAmount = target
+        return target
+    end
+    local shown = w.shownAmount or 0
+    shown = shown + (target - shown) * math.min(1, elapsed * SMOOTH_RATE)
+    if math.abs(target - shown) < 0.5 then shown = target end
+    if shown ~= target then animating = true end
+    w.shownAmount = shown
+    return shown
+end
+
 local function updateWidget(w)
-    local amount = w.preview and w.preview.amount() or amountFor(w.unit)
+    local amount, parts
+    if w.preview then
+        amount, parts = w.preview.amount(), w.preview.parts and w.preview.parts()
+    else
+        amount, parts = amountFor(w.unit)
+    end
     local place = PLACE_SETTING[w.name]
     local hidden = place and not setting(place) and "hidden, turned off in the options"
         or amount <= 0 and "hidden, nothing to heal"
@@ -438,10 +693,25 @@ local function updateWidget(w)
         or plain(w.bar, "IsVisible") == false and "hidden, its health bar isn't visible"
     if hidden then
         w.root:Hide()
+        w.shownAmount, w.lastTarget = 0, 0
         setState(w, hidden)
         return
     end
     if w.lookVersion ~= lookVersion then applyLook(w) end
+    -- A new HoT (more healing to come than a moment ago): flash and spark.
+    if amount > (w.lastTarget or 0) + 0.5 then
+        if setting("flashOnApply") then
+            w.flashAnim:Stop()
+            w.flashAnim:Play()
+        end
+        if setting("showSpark") then
+            w.sparkPunch:Stop()
+            w.sparkPunch:Play()
+        end
+    end
+    w.lastTarget = amount
+    local shown = smoothed(w, amount)
+    local scale = amount > 0 and shown / amount or 0
     local ok, err = pcall(function()
         local maxHealth, missing
         if w.preview then
@@ -451,12 +721,37 @@ local function updateWidget(w)
         end
         w.text:SetText(string.format("+%d", math.floor(amount + 0.5)))
         w.healBar:SetMinMaxValues(0, maxHealth)
-        w.healBar:SetValue(amount)
+        w.healBar:SetValue(shown)
+        local bySpell = setting("hotColors") == "bySpell" and parts ~= nil
+        local total, opacity = 0, setting("healOpacity") / 100
+        for i, segment in ipairs(w.segments) do
+            local part = bySpell and parts[i]
+            if part then
+                total = total + part.amount * scale
+                segment.bar:SetMinMaxValues(0, maxHealth)
+                segment.bar:SetValue(total)
+                local r, g, b = ns.colorOf("color" .. part.name)
+                segment.texture:SetVertexColor(r, g, b, opacity)
+                segment.texture:Show()
+                segment.divider:SetShown(setting("segmentDividers") and parts[i + 1] ~= nil)
+            else
+                segment.texture:Hide()
+                segment.divider:Hide()
+            end
+        end
+        -- Without per-HoT parts (the test bar) the one color fills in, even in "a color per HoT".
+        local wantsSingle = not bySpell
+        if wantsSingle ~= (w.healTex:IsShown() or w.stripes:IsShown()) then
+            local fill = ns.findEntry(ns.lists.fills, setting("fillTexture"))
+            local scrolling = fill.id == "stripes" and setting("scrollStripes")
+            w.healTex:SetShown(wantsSingle and not scrolling)
+            w.stripes:SetShown(wantsSingle and scrolling)
+        end
         w.overBar:SetMinMaxValues(0, maxHealth)
-        w.overBar:SetValue(amount)
+        w.overBar:SetValue(shown)
         -- From -1, so full health (nothing missing) is still a range to fill, and counts as topped off.
         w.iconBar:SetMinMaxValues(-1, missing)
-        w.iconBar:SetValue(amount)
+        w.iconBar:SetValue(shown)
         if not w.plate then w.root:SetAlpha(plain(w.bar, "GetEffectiveAlpha") or 1) end
     end)
     w.root:SetShown(ok)
@@ -583,6 +878,7 @@ end
 local function hideAll()
     for _, w in ipairs(widgets) do
         w.root:Hide()
+        w.shownAmount, w.lastTarget = 0, 0
         setState(w, "hidden, nothing to heal")
     end
     for unit in pairs(activePlates) do releasePlate(unit) end
@@ -603,8 +899,9 @@ driver:SetScript("OnUpdate", function(_, elapsed)
         showing, sinceCheck = true, HOST_CHECK_SECONDS -- find the frames right away
     end
     sinceUpdate, sinceCheck = sinceUpdate + elapsed, sinceCheck + elapsed
-    if sinceUpdate < 0.1 then return end
+    if sinceUpdate < (animating and 0 or 0.1) then return end
     sinceUpdate = 0
+    animating = false
     local check = sinceCheck >= HOST_CHECK_SECONDS
     if check then sinceCheck = 0 end
     for _, w in ipairs(widgets) do

@@ -405,7 +405,7 @@ f:SetScript("OnEvent", function(self, event, ...)
         log = db.log or log
         db.log = log
         echo = db.echo or false
-        out("Loaded (v6, options window). /dil for settings, /dil help for commands.", true)
+        out("Loaded (v7, bar options). /dil for settings, /dil help for commands.", true)
         out("Event registrations: " .. table.concat(registrations, " "))
         local optionsOK, optionsErr = pcall(ns.registerOptions)
         if not optionsOK then out("Options > AddOns page ERROR " .. tostring(optionsErr)) end

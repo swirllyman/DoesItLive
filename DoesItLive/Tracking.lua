@@ -174,18 +174,35 @@ function tracking.any()
     return hotCount > 0
 end
 
--- Healing your HoTs still have to do on this unit (0 if none). shown(spell name), if given, leaves out the HoTs
--- it says no to (turned off in the options).
-function tracking.remaining(unit, shown)
-    if hotCount == 0 then return 0 end
+-- Healing your HoTs still have to do on this unit (0 if none), and per HoT: { { name, amount }, ... } in a fixed
+-- spell order (so per-HoT colors don't swap places). shown(spell name), if given, leaves out the HoTs it says no to
+-- (turned off in the options).
+local SPELL_ORDER = { Rejuvenation = 1, Regrowth = 2, Renew = 3, Riptide = 4 }
+
+function tracking.breakdown(unit, shown)
+    if hotCount == 0 then return 0, nil end
     local guidKey, nameKey = keysOf(unit)
-    local now, sum = GetTime(), 0
+    local now, sum, parts = GetTime(), 0, nil
     for _, key in ipairs({ guidKey or false, nameKey or false }) do
         for name, hot in pairs(key and hotsByKey[key] or {}) do
-            if not shown or shown(name) then sum = sum + remainingOf(hot, now) end
+            if not shown or shown(name) then
+                local amount = remainingOf(hot, now)
+                if amount > 0 then
+                    sum = sum + amount
+                    parts = parts or {}
+                    parts[#parts + 1] = { name = name, amount = amount }
+                end
+            end
         end
     end
-    return sum
+    if parts then
+        table.sort(parts, function(a, b) return (SPELL_ORDER[a.name] or 9) < (SPELL_ORDER[b.name] or 9) end)
+    end
+    return sum, parts
+end
+
+function tracking.remaining(unit, shown)
+    return (tracking.breakdown(unit, shown))
 end
 
 function tracking.list()

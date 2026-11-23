@@ -228,7 +228,7 @@ def main():
     for level, count in pairs(seen) do
         assert(count == 3, "level " .. level .. " used " .. count .. " times") levels = levels + 1 -- once per widget
     end
-    assert(levels == 9, "layers: " .. levels)
+    assert(levels == 11, "layers: " .. levels)
     friendlyTarget = true fireEvent("PLAYER_TARGET_CHANGED") assert(targetShown() == true, "hidden on a friend")
     friendlyTarget = "secret" tick(0.2) assert(targetShown() == false, "shown on an unreadable target")
     friendlyTarget = true tick(0.2) assert(targetShown() == true, "not shown again")
@@ -300,7 +300,7 @@ def main():
     text = "\n".join(log[i] for i in range(1, len(log) + 1))
     for needle in ["SNAPSHOT (manual)", "BAR attach player to", "BAR attach personal to", "BAR attach target to", "BAR target layer: above MEDIUM/1001", "BAR player layer: above MEDIUM/1001 (found LOW/20", "BAR player iconWindow: ",
                    "BAR target state: hidden, unit not friendly", "All settings reset.",
-                   "Bold preset applied.", "Heal bar on friendly nameplates OFF", "BAR target state: shown",
+                   "Juicy preset applied.", "Per HoT preset applied.", "Heal bar on friendly nameplates OFF", "BAR target state: shown",
                    "PLATE nameplate1 plate ok, bar UnitFrame.healthBar", "PLATE nameplate3 plate not reachable (forbidden)",
                    "PLATE nameplate4 plate forbidden", "PLATE nameplate5 plate ok, bar not reachable",
                    "friendly nameplates OFF", "friendly nameplates ON",

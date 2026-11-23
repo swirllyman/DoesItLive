@@ -208,6 +208,23 @@ DoesItLiveDB.spellRenew = false NS.display.settingsChanged() wait(0.3) expect("R
 expect("still tracked", left("party1"), 830)
 DoesItLiveDB.spellRenew = true NS.display.settingsChanged() wait(0.3) expect("Renew back", plateRoot.shown, true)
 wait(16) expect("nameplate after", plateRoot.shown, false)
+-- Every bar option at once, with time moving: a color per HoT, outline, effects, then back to the defaults.
+for key, value in pairs({ hotColors = "bySpell", fillTexture = "stripes", scrollStripes = true, outlineStyle = "dashed",
+    dashLength = 8, showGlow = true, showShine = true, showSpark = true, pulseOutline = true, showText = true,
+    textPosition = "above", topOffIcon = "leaf", iconPulse = true, smoothMotion = true }) do DoesItLiveDB[key] = value end
+NS.display.settingsChanged()
+cast(774, "Joe Gg") cast(8936, "Joe Gg")
+expect("both HoTs", left("player"), 514)
+local sum, parts = T.breakdown("player")
+expect("breakdown total", math.floor(sum + 0.5), 514)
+expect("breakdown order", parts[1].name .. "," .. parts[2].name, "Rejuvenation,Regrowth")
+wait(4) expect("per HoT bar", playerRoot.shown, true)
+DoesItLiveDB.fillTexture = "gradient" DoesItLiveDB.hotColors = "single" NS.display.settingsChanged() wait(1)
+DoesItLiveDB.smoothMotion = false NS.display.settingsChanged() wait(1)
+SlashCmdList.DOESITLIVE("bar 300") wait(0.5) SlashCmdList.DOESITLIVE("bar") -- the test bar has no per-HoT parts
+for key, value in pairs(NS.DEFAULTS) do DoesItLiveDB[key] = value end
+NS.display.settingsChanged()
+wait(25) expect("all gone", playerRoot.shown, false)
 -- The manual override, and back to the HoTs.
 SlashCmdList.DOESITLIVE("bar 800") expect("override", playerRoot.shown, true)
 SlashCmdList.DOESITLIVE("bar") expect("override off", playerRoot.shown, false)

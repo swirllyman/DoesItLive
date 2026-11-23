@@ -11,7 +11,14 @@ ns.DEFAULTS = {
     -- Which HoTs
     spellRejuvenation = true, spellRegrowth = true, spellRenew = true, spellRiptide = true,
     -- Heal fill
-    healColor = "teal", healOpacity = 60,
+    healColor = "teal", healOpacity = 60, fillTexture = "flat",
+    hotColors = "single", segmentDividers = true,
+    colorRejuvenation = "teal", colorRegrowth = "green", colorRenew = "cyan", colorRiptide = "blue",
+    -- Outline around the heal
+    outlineStyle = "none", dashLength = 4, outlineThickness = 1, outlineColor = "teal", outlineOpacity = 100,
+    -- Animation and effects
+    smoothMotion = true, flashOnApply = true, pulseOutline = false, showSpark = false,
+    showGlow = false, glowSize = 4, showShine = false, shineInterval = 4, scrollStripes = false,
     -- Overheal
     showOverheal = true, overhealColor = "paleBlue", overhealOpacity = 95, overhealHeight = 30,
     -- Tops off icon
@@ -37,6 +44,30 @@ ns.lists = {
         { id = "teal", label = "Teal", rgb = { 0.3, 1, 0.8 } },
         { id = "green", label = "Green", rgb = { 0.35, 1, 0.35 } },
         { id = "paleBlue", label = "Pale blue", rgb = { 0.65, 0.85, 1 } },
+    },
+    fills = {
+        { id = "flat", label = "Flat", path = "Interface\\Buttons\\WHITE8X8" },
+        { id = "smooth", label = "Health bar texture", path = "Interface\\TargetingFrame\\UI-StatusBar" },
+        { id = "raid", label = "Raid bar texture", path = "Interface\\RaidFrame\\Raid-Bar-Hp-Fill" },
+        { id = "stripes", label = "Diagonal stripes", path = "Interface\\AddOns\\DoesItLive\\Textures\\Stripes",
+          tiled = true },
+        { id = "gradient", label = "Fade in from left", path = "Interface\\Buttons\\WHITE8X8", gradient = true },
+    },
+    hotColors = {
+        { id = "single", label = "One color" },
+        { id = "bySpell", label = "A color per HoT" },
+    },
+    outlines = {
+        { id = "none", label = "None" },
+        { id = "solid", label = "Solid" },
+        { id = "dashed", label = "Dashed" },
+    },
+    dashLengths = { -- tools/make_textures.py makes these
+        { id = 1, label = "Fine dots (1px)" },
+        { id = 2, label = "Dots (2px)" },
+        { id = 4, label = "Short dashes (4px)" },
+        { id = 8, label = "Dashes (8px)" },
+        { id = 16, label = "Long dashes (16px)" },
     },
     icons = {
         { id = "plus", label = "Plus" },

@@ -17,7 +17,8 @@ The plan (feasibility, display geometry, tracking, how it stays out of DoesItDie
 The bars follow your HoTs (Rejuvenation, Regrowth, Renew, Riptide), with an options window (`/dil`). Verified
 in-game: the bars on the player frame, friendly target frame and personal resource display, and the tracking (Joe,
 2026-11-22: "looks like it's working"). **Not** yet verified in-game: friendly nameplates (name-only plates have no
-bar to draw on: `nameplateShowOnlyNameForFriendlyPlayerUnits`) and the options window. Missing: Wild Growth, other
+bar to draw on: `nameplateShowOnlyNameForFriendlyPlayerUnits`), the options window and the bar options (fill
+styles, a color per HoT, outline, effects). Missing: Wild Growth, other
 players' HoTs, custom health bars (DoesItDie's Frames.lua and Pick mode).
 
 | File | What |
@@ -26,7 +27,8 @@ players' HoTs, custom health bars (DoesItDie's Frames.lua and Pick mode).
 | `DoesItLive/Settings.lua` | `ns.DEFAULTS` (filled into `DoesItLiveDB` on load), the options' choice lists, `ns.setting(key)` |
 | `DoesItLive/Tracking.lua` | HoTs per unit (kept by GUID, else by name): casts, tooltips, timing, corrections from auras out of combat. `ns.tracking.remaining(unit)` |
 | `DoesItLive/Display.lua` | The bars and which frames they sit on, in the settings' look; also on the options preview's mock bars (`display.setPreview`). `ns.display`; `display.settingsChanged()` after any setting change |
-| `DoesItLive/Options.lua` | The options window (`/dil`), built like DoesItDie's: live preview (mock player frame and nameplate drawn by Display.lua), tabs (Show on, Look, Icon & text, Advanced), presets, hand-built controls; plus a page in Options > AddOns that opens it |
+| `DoesItLive/Options.lua` | The options window (`/dil`), built like DoesItDie's: live preview (mock player frame and nameplate drawn by Display.lua, two sample HoTs), tabs (Show on, Bar, Outline, Effects, Overheal & icon, Text, Advanced), presets, hand-built controls; plus a page in Options > AddOns that opens it. One look for every place (DoesItDie splits nameplates because enemy plates are red; friendly ones are green like the frames) |
+| `DoesItLive/Textures/`, `tools/make_textures.py` | Dash, stripes, spark and shine textures, made by the script (adapted from DoesItDie's). New files need a full client restart |
 
 ## What the probe found (Forever 1.60.1, druid 35, 2026-11-22)
 
@@ -48,11 +50,13 @@ in math). DoesItDie's CLAUDE.md has the verified table for enemies. The rules th
 
 - Never compute "does it top off" in Lua. Feed secret values (max health) into `StatusBar` widgets and let the
   geometry answer: a heal bar the health bar's size, `max` = max health, `value` = remaining heal, pinned to the end
-  of the green fill (`healthBar:GetStatusBarTexture()`) and clipped to the bar, is the effective part. A
+  of the green fill (`healthBar:GetStatusBarTexture()`) and clipped to the bar, is the effective part (a color
+  per HoT: running-total bars, each segment from the end of the one before, as DoesItDie's per-DoT colors). A
   reverse-filled bar over the host spans its last `heal`; its overlap with the green is the overheal, drawn as a
   strip along the bottom so the end of the green stays readable. The icon rides
   a 10000px fill of `heal` out of `UnitHealthMissing` (from -1, so full health isn't an empty range), which stops at
-  full width once it tops off. Don't chain health + heal bars for the icon: that end keeps moving with overheal and
+  full width once it tops off. Effects around the heal (outline, glow, flash,
+  spark, shine, stripes) sit inside the bar's clip, so the glow fades inward; every texture in it gets the mask. Don't chain health + heal bars for the icon: that end keeps moving with overheal and
   the icon slides out of its window.
 - Forever's player health bar is 20 tall but masked to its 15 tall `HealthBarsContainer`: clip to the container and
   add its `HealthBarMask` to our textures. The bars under the character are

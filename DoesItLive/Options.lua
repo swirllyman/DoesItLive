@@ -9,7 +9,7 @@
 local _, ns = ...
 
 local WHITE = "Interface\\Buttons\\WHITE8X8"
-local WINDOW_WIDTH, WINDOW_HEIGHT = 760, 470
+local WINDOW_WIDTH, WINDOW_HEIGHT = 840, 500
 local HEADER_HEIGHT = 52
 local PREVIEW_WIDTH = 270
 local ROW_HEIGHT = 26
@@ -21,17 +21,34 @@ local SIMULATION_STEP = 0.5 -- seconds; one HoT tick per step
 -- Presets only set the look; where it shows and which HoTs count are left alone.
 local PRESETS = {
     { id = "default", label = "Default", values = {
-        healColor = "teal", healOpacity = 60, showOverheal = true, overhealColor = "paleBlue", overhealOpacity = 95,
-        overhealHeight = 30, topOffIcon = "plus", iconSize = 100, iconPulse = false, showText = false,
+        healColor = "teal", healOpacity = 60, fillTexture = "flat", hotColors = "single", outlineStyle = "none",
+        smoothMotion = true, flashOnApply = true, pulseOutline = false, showSpark = false, showGlow = false,
+        showShine = false, scrollStripes = false,
+        showOverheal = true, overhealColor = "paleBlue", overhealOpacity = 95, overhealHeight = 30,
+        topOffIcon = "plus", iconSize = 100, iconPulse = false, showText = false,
     } },
     { id = "subtle", label = "Subtle", values = {
-        healColor = "green", healOpacity = 35, showOverheal = true, overhealColor = "paleBlue", overhealOpacity = 70,
-        overhealHeight = 20, topOffIcon = "plus", iconSize = 80, iconPulse = false, showText = false,
+        healColor = "green", healOpacity = 35, fillTexture = "gradient", hotColors = "single", outlineStyle = "none",
+        smoothMotion = true, flashOnApply = false, pulseOutline = false, showSpark = false, showGlow = false,
+        showShine = false, scrollStripes = false,
+        showOverheal = true, overhealColor = "paleBlue", overhealOpacity = 70, overhealHeight = 20,
+        topOffIcon = "plus", iconSize = 80, iconPulse = false, showText = false,
     } },
-    { id = "bold", label = "Bold", values = {
-        healColor = "cyan", healOpacity = 85, showOverheal = true, overhealColor = "purple", overhealOpacity = 100,
-        overhealHeight = 45, topOffIcon = "leaf", iconSize = 120, iconPulse = true, showText = true,
-        textPosition = "left", textSize = 11, textColor = "white",
+    { id = "perHot", label = "Per HoT", values = {
+        healOpacity = 70, fillTexture = "smooth", hotColors = "bySpell", segmentDividers = true,
+        outlineStyle = "solid", outlineThickness = 1, outlineColor = "paleBlue", outlineOpacity = 80,
+        smoothMotion = true, flashOnApply = true, pulseOutline = false, showSpark = true, showGlow = false,
+        showShine = false, scrollStripes = false,
+        showOverheal = true, overhealColor = "paleBlue", overhealOpacity = 95, overhealHeight = 30,
+        topOffIcon = "plus", iconSize = 100, iconPulse = false, showText = true, textPosition = "left",
+    } },
+    { id = "juicy", label = "Juicy", values = {
+        healColor = "cyan", healOpacity = 90, fillTexture = "stripes", hotColors = "single",
+        outlineStyle = "dashed", dashLength = 4, outlineThickness = 1, outlineColor = "teal", outlineOpacity = 90,
+        smoothMotion = true, flashOnApply = true, pulseOutline = true, showSpark = true, showGlow = true, glowSize = 5,
+        showShine = true, shineInterval = 3, scrollStripes = true,
+        showOverheal = true, overhealColor = "purple", overhealOpacity = 100, overhealHeight = 45,
+        topOffIcon = "leaf", iconSize = 120, iconPulse = true, showText = true, textPosition = "left", textSize = 11,
     } },
 }
 
@@ -43,6 +60,7 @@ local simulation
 
 -- Preview numbers, in % of the mock unit's max health.
 local preview = { health = 55, heal = 30 }
+local PREVIEW_SPLIT = { { name = "Rejuvenation", share = 0.6 }, { name = "Regrowth", share = 0.4 } }
 
 local function db() return ns.db() end
 local function print(msg) ns.out(msg, true) end
@@ -433,28 +451,63 @@ local function buildTabs()
     show:info("Count these HoTs", function() return "" end)
     for _, spell in ipairs(ns.SPELLS) do show:checkbox("spell" .. spell, "  " .. spell) end
 
-    local hasOverheal = function(s) return s("showOverheal") end
-    local look = addTab("Look")
-    look:choice("healColor", "Heal color", lists.colors, { tooltip = "The healing still to come, from the end of "
+    local single = function(s) return s("hotColors") ~= "bySpell" end
+    local bySpell = function(s) return s("hotColors") == "bySpell" end
+    local bar = addTab("Bar")
+    bar:choice("fillTexture", "Fill style", lists.fills, { tooltip = "The healing still to come, from the end of "
         .. "the green." })
-    look:slider("healOpacity", "Heal opacity", 10, 100, 5, { suffix = "%" })
-    look:gap()
-    look:checkbox("showOverheal", "Show overheal", { tooltip = "A strip along the bottom of the green for the "
-        .. "healing that would go past full health." })
-    look:choice("overhealColor", "Overheal color", lists.colors, { enabledIf = hasOverheal })
-    look:slider("overhealOpacity", "Overheal opacity", 10, 100, 5, { suffix = "%", enabledIf = hasOverheal })
-    look:slider("overhealHeight", "Overheal height", 10, 100, 5, { suffix = "%", enabledIf = hasOverheal,
-        tooltip = "In % of the health bar's height. 100% covers the end of the green." })
+    bar:choice("hotColors", "HoT colors", lists.hotColors, { tooltip = "One color for all your HoTs, or one "
+        .. "segment per HoT in its own color." })
+    bar:choice("healColor", "Heal color", lists.colors, { enabledIf = single })
+    for _, spell in ipairs(ns.SPELLS) do
+        bar:choice("color" .. spell, "  " .. spell, lists.colors, { enabledIf = bySpell })
+    end
+    bar:checkbox("segmentDividers", "Dividers between HoTs", { enabledIf = bySpell })
+    bar:slider("healOpacity", "Opacity", 10, 100, 5, { suffix = "%" })
 
+    local hasOutline = function(s) return s("outlineStyle") ~= "none" end
+    local outline = addTab("Outline")
+    outline:choice("outlineStyle", "Outline", lists.outlines, { tooltip = "A line around the healing still to come." })
+    outline:choice("dashLength", "Dash length", lists.dashLengths,
+        { enabledIf = function(s) return s("outlineStyle") == "dashed" end })
+    outline:slider("outlineThickness", "Thickness", 1, 4, 1, { enabledIf = hasOutline })
+    outline:choice("outlineColor", "Color", lists.colors, { enabledIf = hasOutline })
+    outline:slider("outlineOpacity", "Opacity", 10, 100, 5, { suffix = "%", enabledIf = hasOutline })
+    outline:checkbox("pulseOutline", "Pulse outline", { enabledIf = hasOutline,
+        tooltip = "Gently pulses the outline, glow and spark." })
+
+    local effects = addTab("Effects")
+    effects:checkbox("smoothMotion", "Smooth motion",
+        { tooltip = "The bar grows in when a HoT lands and glides down at each tick instead of jumping." })
+    effects:checkbox("flashOnApply", "Flash on new HoT")
+    effects:checkbox("showSpark", "Spark", { tooltip = "A bright flare at the heal's end when a HoT lands." })
+    effects:checkbox("showGlow", "Glow", { tooltip = "A soft glow inside the heal's edges, in the outline color "
+        .. "(the heal color without an outline)." })
+    effects:slider("glowSize", "Glow size", 2, 10, 1, { enabledIf = function(s) return s("showGlow") end })
+    effects:checkbox("showShine", "Shine sweep")
+    effects:slider("shineInterval", "Shine every", 2, 10, 1,
+        { suffix = "s", enabledIf = function(s) return s("showShine") end })
+    effects:checkbox("scrollStripes", "Scroll stripes", { tooltip = "Animates the diagonal stripes fill.",
+        enabledIf = function(s) return s("fillTexture") == "stripes" and single(s) end })
+
+    local hasOverheal = function(s) return s("showOverheal") end
     local hasIcon = function(s) return s("topOffIcon") ~= "none" end
-    local showsText = function(s) return s("showText") end
-    local icon = addTab("Icon & text")
-    icon:choice("topOffIcon", "Tops off icon", lists.icons, { tooltip = "Shows at the right end of the health bar "
+    local over = addTab("Overheal & icon")
+    over:checkbox("showOverheal", "Show overheal", { tooltip = "A strip along the bottom of the green for the "
+        .. "healing that would go past full health." })
+    over:choice("overhealColor", "Overheal color", lists.colors, { enabledIf = hasOverheal })
+    over:slider("overhealOpacity", "Overheal opacity", 10, 100, 5, { suffix = "%", enabledIf = hasOverheal })
+    over:slider("overhealHeight", "Overheal height", 10, 100, 5, { suffix = "%", enabledIf = hasOverheal,
+        tooltip = "In % of the health bar's height. 100% covers the end of the green." })
+    over:gap()
+    over:choice("topOffIcon", "Tops off icon", lists.icons, { tooltip = "Shows at the right end of the health bar "
         .. "when your HoTs will fill it." })
-    icon:slider("iconSize", "Icon size", 50, 140, 10, { suffix = "%", enabledIf = hasIcon,
+    over:slider("iconSize", "Icon size", 50, 140, 10, { suffix = "%", enabledIf = hasIcon,
         tooltip = "In % of the health bar's height (it can't grow past the bar)." })
-    icon:checkbox("iconPulse", "Pulse the icon", { enabledIf = hasIcon })
-    icon:gap()
+    over:checkbox("iconPulse", "Pulse the icon", { enabledIf = hasIcon })
+
+    local showsText = function(s) return s("showText") end
+    local icon = addTab("Text")
     icon:checkbox("showText", "Show heal text", { tooltip = "The healing still to come, like +830." })
     icon:choice("textPosition", "Text position", lists.textPositions, { enabledIf = showsText })
     icon:slider("textSize", "Text size", 7, 18, 1, { enabledIf = showsText })
@@ -525,7 +578,7 @@ local function buildPreview(pane)
             preview.heal = value
             updatePreview()
         end, { layout = PREVIEW_LAYOUT, suffix = "%", tooltip = "Healing your HoTs still have to do, in % of "
-            .. "max health." })
+            .. "max health: a Rejuvenation (60%) and a Regrowth (40%)." })
     heal:SetPoint("TOPLEFT", health, "BOTTOMLEFT", 0, 0)
 
     window.simulateButton = pushButton(pane, "Simulate HoTs", 130, function()
@@ -561,7 +614,12 @@ local function buildPreview(pane)
 
     local function host(bar)
         return { bar = bar, area = bar, max = function() return 100 end, health = function() return preview.health end,
-            amount = function() return preview.heal end }
+            amount = function() return preview.heal end,
+            parts = function() -- two sample HoTs, for "A color per HoT"
+                local parts = {}
+                for i, sample in ipairs(PREVIEW_SPLIT) do parts[i] = { name = sample.name, amount = preview.heal * sample.share } end
+                return parts
+            end }
     end
     window.hosts = { frame = host(healthBar), plate = host(plateBar) }
 
