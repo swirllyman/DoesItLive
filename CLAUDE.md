@@ -98,6 +98,24 @@ can assist. DoesItLive's icon goes at the bar's right end (never the portrait), 
 DoesItDie's skull, X, checkmark or sunglasses), its colors are teal (effective) and pale blue (overheal), never red,
 gold or white stripes. Own names everywhere: `/dil`, `DoesItLive*` globals, `DoesItLiveDB`, own textures.
 
+## External pull requests (strict review)
+
+Pull requests from anyone but swirllyman get a full review before they merge, written down and seen by the owner:
+
+- **Claude never merges an external pull request**, and never tells the owner one is ready, without a full written
+  review: every changed file read, posted on the pull request (or in the project thread) and acknowledged by the
+  owner. Green tests are not a review.
+- The review covers security as well as correctness: chat output and addon messages (`SendChatMessage`,
+  `C_ChatInfo.SendAddonMessage`, `CHAT_MSG_*` handlers: which channels, from whom), anything that runs code from a
+  string (`loadstring`, `RunScript`), global hooks, CVars and bindings, saved data, obfuscated or encoded code, and
+  every change to `.github/` (the release workflow holds the `CF_API_KEY` secret), `.pkgmeta`, the `.toc` and
+  `tools/`.
+- Read an external pull request's `tools/*.py` changes **before** running its tests locally: they're Python and run
+  with your rights. CI (`.github/workflows/tests.yml`) runs them on `pull_request` with a read-only token and no
+  secrets; never switch it to `pull_request_target`.
+- Changes to `.github/`, `.pkgmeta` or the release setup in an external pull request go in their own pull request,
+  never bundled with a feature.
+
 ## Working on it
 
 - **Game install:** `C:\Program Files (x86)\World of Warcraft\_forever_\`. Junction
