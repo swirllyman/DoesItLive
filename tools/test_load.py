@@ -25,7 +25,7 @@ local function newObject()
             elseif k == "GetFrameLevel" then return 3
             elseif k == "GetFrameStrata" then return "MEDIUM"
             elseif k == "GetName" then return nil
-            elseif k == "GetStringWidth" then return 40
+            elseif k == "GetStringWidth" then return fakeStringWidth or 40
             elseif k == "GetFont" then return "Fonts\\FRIZQT__.TTF", 10
             end
         end
@@ -183,7 +183,8 @@ def main():
     lua = lupa51.LuaRuntime(unpack_returned_tuples=True)
     lua.execute(FAKE_WOW)
     files = toc_files()
-    load_addon(lua)
+    ns = load_addon(lua)
+    lua.globals().NS_optionsTabsFit = ns.optionsTabsFit
 
     script = r"""
     fireEvent("ADDON_LOADED", "DoesItLive")
@@ -291,6 +292,8 @@ def main():
     end
     runTickers(12) runTimers()
     tick(0.2) tick(1.1)
+    local fits, rows = NS_optionsTabsFit()
+    assert(fits == true and rows == 1, "tabs at 40px text: " .. tostring(fits) .. " " .. tostring(rows))
     cmd("") -- closes it
     cmd("help")
     fireEvent("PLAYER_LOGOUT")
@@ -317,7 +320,16 @@ def main():
         sys.exit(1)
     if "-v" in sys.argv:
         print(text)
-    print(f"OK: {len(files)} file(s) loaded, {lines} log lines, no errors")
+    # Wide tab names (a bigger font, another language): a fresh load whose window has to wrap its tabs.
+    wide = lupa51.LuaRuntime(unpack_returned_tuples=True)
+    wide.execute(FAKE_WOW)
+    wide_ns = load_addon(wide)
+    wide.execute('fakeStringWidth = 95 fireEvent("ADDON_LOADED", "DoesItLive") SlashCmdList.DOESITLIVE("")')
+    fits, rows = wide_ns.optionsTabsFit()
+    if fits is not True or rows < 2:
+        print("tabs with wide names: fits", fits, "rows", rows)
+        sys.exit(1)
+    print(f"OK: {len(files)} file(s) loaded, {lines} log lines, no errors, tabs fit in 1 row (wide names: {rows} rows)")
 
 
 if __name__ == "__main__":

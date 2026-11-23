@@ -12,6 +12,9 @@ local WHITE = "Interface\\Buttons\\WHITE8X8"
 local WINDOW_WIDTH, WINDOW_HEIGHT = 920, 500
 local HEADER_HEIGHT = 52
 local PREVIEW_WIDTH = 270
+-- The settings panel's inner width (window minus preview and margins, minus 8px padding each side) and the tab rows.
+local TABS_WIDTH = WINDOW_WIDTH - PREVIEW_WIDTH - 30 - 16
+local TAB_ROW_HEIGHT, TAB_GAP = 28, 2
 local ROW_HEIGHT = 26
 local SETTINGS_LAYOUT = { label = 170, control = 190 }
 local CHECK_LAYOUT = { label = 210, control = 26 } -- the two-column lists
@@ -390,27 +393,20 @@ end
 local function addTab(name)
     local area = window.settingsArea
     local tab = { keys = {}, y = 0 }
-    tab.content = CreateFrame("Frame", nil, area)
-    tab.content:SetPoint("TOPLEFT", area, "TOPLEFT", 8, -40)
-    tab.content:SetPoint("BOTTOMRIGHT", area, "BOTTOMRIGHT", -8, 40)
+    tab.content = CreateFrame("Frame", nil, area) -- placed by layoutTabs, below however many rows the tabs take
     tab.content:Hide()
 
     local button = CreateFrame("Button", nil, area)
     button.text = button:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     button.text:SetText(name)
-    button:SetSize((button.text:GetStringWidth() or 60) + 16, 26)
+    button.width = (button.text:GetStringWidth() or 60) + 16
+    button:SetSize(button.width, 26)
     button.text:SetPoint("CENTER")
     button.underline = button:CreateTexture(nil, "ARTWORK")
     button.underline:SetColorTexture(1, 0.82, 0, 1)
     button.underline:SetHeight(2)
     button.underline:SetPoint("BOTTOMLEFT", 3, 0)
     button.underline:SetPoint("BOTTOMRIGHT", -3, 0)
-    local previous = tabs[#tabs]
-    if previous then
-        button:SetPoint("LEFT", previous.button, "RIGHT", 2, 0)
-    else
-        button:SetPoint("TOPLEFT", area, "TOPLEFT", 8, -8)
-    end
     button:SetScript("OnClick", function() selectTab(tab) end)
     tab.button = button
 
@@ -433,6 +429,42 @@ local function addTab(name)
 
     table.insert(tabs, tab)
     return tab
+end
+
+-- Puts the tab buttons in rows that fit the panel (their widths depend on the font and language), then the divider
+-- and every tab's content below the last row.
+local function layoutTabs()
+    local area = window.settingsArea
+    local x, row = 0, 0
+    window.tabLayout = {}
+    for _, tab in ipairs(tabs) do
+        local width = tab.button.width
+        if x > 0 and x + width > TABS_WIDTH then
+            row, x = row + 1, 0
+        end
+        tab.button:ClearAllPoints()
+        tab.button:SetPoint("TOPLEFT", area, "TOPLEFT", 8 + x, -8 - row * TAB_ROW_HEIGHT)
+        window.tabLayout[#window.tabLayout + 1] = { x = x, width = width, row = row }
+        x = x + width + TAB_GAP
+    end
+    local top = 8 + (row + 1) * TAB_ROW_HEIGHT - 2 -- below the last row
+    window.divider:ClearAllPoints()
+    window.divider:SetPoint("TOPLEFT", 8, -top)
+    window.divider:SetPoint("TOPRIGHT", -8, -top)
+    for _, tab in ipairs(tabs) do
+        tab.content:ClearAllPoints()
+        tab.content:SetPoint("TOPLEFT", area, "TOPLEFT", 8, -(top + 6))
+        tab.content:SetPoint("BOTTOMRIGHT", area, "BOTTOMRIGHT", -8, 40)
+    end
+end
+
+-- For the tests: whether every tab button ends inside the panel.
+function ns.optionsTabsFit()
+    if not window or not window.tabLayout then return nil end
+    for _, entry in ipairs(window.tabLayout) do
+        if entry.x + entry.width > TABS_WIDTH then return false end
+    end
+    return true, window.tabLayout[#window.tabLayout].row + 1
 end
 
 local function resetTab(tab)
@@ -747,13 +779,12 @@ local function createWindow()
     setBackdrop(area, 0.09)
     window.settingsArea = area
 
-    local divider = area:CreateTexture(nil, "ARTWORK")
-    divider:SetColorTexture(0.28, 0.28, 0.3, 1)
-    divider:SetHeight(1)
-    divider:SetPoint("TOPLEFT", 8, -34)
-    divider:SetPoint("TOPRIGHT", -8, -34)
+    window.divider = area:CreateTexture(nil, "ARTWORK")
+    window.divider:SetColorTexture(0.28, 0.28, 0.3, 1)
+    window.divider:SetHeight(1)
 
     buildTabs()
+    layoutTabs()
     local reset = pushButton(area, "Reset this tab", 120, function() resetTab(activeTab) end)
     reset:SetPoint("BOTTOMRIGHT", -10, 10)
 
