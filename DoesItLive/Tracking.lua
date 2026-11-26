@@ -13,6 +13,11 @@
 --   * corrections: out of combat your auras are readable, so a HoT that's gone is dropped, one that's there with
 --     another expiration is moved, and one that was missed (a /reload) is picked up. In combat none of that can be
 --     read: a HoT dispelled or cancelled then stays until it would have expired.
+--   * Bloom (a Forever Restoration talent, 1 rank): a Rejuvenation or Regrowth that runs its full duration heals
+--     for 100% of your Spirit as it ends (50% when dispelled, which can't be seen in combat, so not counted). Counted
+--     as the HoT's last bit of healing while it runs, when you have the talent (talent tree, else the spell by name)
+--     and Spirit was readable (out of combat; cached for combat). A Swiftmend or a recast ends it without a bloom.
+--     Unverified in-game: that the bloom heals exactly your Spirit (healing bonuses may change it).
 --   * besides HoTs on others (Settings.lua's groups): heals on yourself from draining spells, on your pet, from
 --     totems and Penance, and bandages, food and anything else of yours whose tooltip heals over time. Channels
 --     (Drain Life, Mend Pet, Health Funnel, Penance, bandages) end when the channel does; Healing Stream Totem lasts
@@ -106,6 +111,10 @@ local FRONT_FIRST, FRONT_LAST = 1.3, 0.7 -- Wild Growth's first and last tick, i
 local SPREAD_FROM, SPREAD_TO = 0.5, 1.8
 -- Swiftmend uses up one of these on its target. (Unverified on Forever.)
 local SWIFTMEND_USES = { ["Rejuvenation"] = true, ["Regrowth"] = true }
+-- The Bloom talent heals as these run out.
+local BLOOMS = { ["Rejuvenation"] = true, ["Regrowth"] = true }
+local BLOOM_TALENT = "Bloom"
+local SPIRIT = 5 -- UnitStat index
 
 local SENT_SECONDS = 15        -- how long a sent cast waits for its SUCCEEDED
 local AURA_GRACE_SECONDS = 1.5 -- a new HoT's aura may show up this much later than its cast
@@ -209,6 +218,63 @@ end
 local hotsByKey = {} -- key -> { spell name -> hot }
 local hotCount = 0
 
+-- Bloom
+local bloom = { known = nil, how = "not checked", spirit = nil } -- known: nil until checked
+tracking.bloomState = bloom
+
+-- Whether you have the Bloom talent, and how that was found: the talent tree (Classic's GetTalentInfo), else the
+-- spell by name (IsPlayerSpell). Nil if neither can say.
+local function findBloomTalent()
+    if type(GetNumTalentTabs) == "function" and type(GetNumTalents) == "function" and type(GetTalentInfo) == "function" then
+        local tabs = plainCall(GetNumTalentTabs)
+        for tab = 1, type(tabs) == "number" and tabs or 0 do
+            local count = plainCall(GetNumTalents, tab)
+            for index = 1, type(count) == "number" and count or 0 do
+                local ok, name, _, _, _, rank = pcall(GetTalentInfo, tab, index)
+                if ok and not isSecret(name) and name == BLOOM_TALENT and not isSecret(rank) then
+                    return type(rank) == "number" and rank > 0, "talent tree, rank " .. tostring(rank)
+                end
+            end
+        end
+    end
+    local spellID
+    if C_Spell and type(C_Spell.GetSpellInfo) == "function" then
+        local info = plainCall(C_Spell.GetSpellInfo, BLOOM_TALENT)
+        if type(info) == "table" and not isSecret(info.spellID) then spellID = info.spellID end
+    end
+    if not spellID and type(GetSpellInfo) == "function" then
+        local ok, id = pcall(function() return select(7, GetSpellInfo(BLOOM_TALENT)) end)
+        if ok and not isSecret(id) then spellID = id end
+    end
+    if type(spellID) == "number" and type(IsPlayerSpell) == "function" then
+        return plainCall(IsPlayerSpell, spellID) == true, "spell " .. spellID
+    end
+    return nil, "not found"
+end
+
+-- Rechecks the talent and, out of combat, your Spirit (secret in combat: the last readable value is kept).
+function tracking.updateBloom()
+    local known, how = findBloomTalent()
+    local spirit = bloom.spirit
+    if not ns.inCombat() and type(UnitStat) == "function" then
+        local _, effective = plainCall(UnitStat, "player", SPIRIT)
+        if type(effective) == "number" and effective >= 0 then spirit = effective end
+    end
+    known = known == true
+    if known ~= bloom.known or spirit ~= bloom.spirit then
+        out(string.format("BLOOM talent %s (%s), Spirit %s", known and "yes" or "no", how, tostring(spirit)))
+        bloom.known, bloom.how, bloom.spirit = known, how, spirit
+        if ns.display and hotCount > 0 then ns.display.refresh() end
+    end
+    bloom.how = how
+end
+
+-- What a HoT of this name heals as it runs out (0 without the talent, the option, or a known Spirit).
+function tracking.bloomAmount(name)
+    if not BLOOMS[name] or not bloom.known or not bloom.spirit or ns.setting("countBloom") == false then return 0 end
+    return bloom.spirit
+end
+
 local function remainingTicks(hot, now)
     local left = 0
     for tick = 1, hot.ticks do
@@ -224,7 +290,7 @@ function tracking.tickWeight(hot, tick)
     return FRONT_FIRST + (FRONT_LAST - FRONT_FIRST) * (tick - 1) / (hot.ticks - 1)
 end
 
-local function remainingOf(hot, now)
+local function ticksLeftOf(hot, now)
     if hot.window then return math.min(remainingTicks(hot, now), hot.window) * hot.perTick end
     if not hot.frontLoaded then return remainingTicks(hot, now) * hot.perTick end
     local sum = 0
@@ -232,6 +298,13 @@ local function remainingOf(hot, now)
         if hot.start + tick * hot.interval > now then sum = sum + hot.perTick * tracking.tickWeight(hot, tick) end
     end
     return sum
+end
+
+-- Healing a HoT still has to do: its ticks, plus the Bloom talent's heal as it ends (with the last tick).
+local function remainingOf(hot, now)
+    local left = ticksLeftOf(hot, now)
+    if bloom.known and now < hot.start + hot.duration then left = left + tracking.bloomAmount(hot.name) end
+    return left
 end
 tracking.remainingOf = remainingOf
 
@@ -323,8 +396,10 @@ function tracking.list()
     local lines, now = {}, GetTime()
     for _, hots in pairs(hotsByKey) do
         for name, hot in pairs(hots) do
-            lines[#lines + 1] = string.format("%s on %s: %d left (%d of %d ticks of %.1f), %.1fs", name, hot.who,
-                remainingOf(hot, now), remainingTicks(hot, now), hot.ticks, hot.perTick, hot.start + hot.duration - now)
+            local bloomed = tracking.bloomAmount(name)
+            lines[#lines + 1] = string.format("%s on %s: %d left (%d of %d ticks of %.1f%s), %.1fs", name, hot.who,
+                remainingOf(hot, now), remainingTicks(hot, now), hot.ticks, hot.perTick,
+                bloomed > 0 and string.format(", bloom %d", bloomed) or "", hot.start + hot.duration - now)
         end
     end
     table.sort(lines)
@@ -453,8 +528,10 @@ function tracking.onCastSucceeded(castGUID, spellID)
         sent = i == 1 and recipient or sent
     end
     hot = hotsByKey[recipients[1].guidKey or recipients[1].nameKey][spell]
-    out(string.format("ESTIMATE %s on %s (%s)%s: %d over %.0fs, %d ticks of %.1f every %ds%s%s", spell, sent.who, sent.how,
+    local bloomed = tracking.bloomAmount(spell)
+    out(string.format("ESTIMATE %s on %s (%s)%s: %d over %.0fs, %d ticks of %.1f every %ds%s%s%s", spell, sent.who, sent.how,
         recast and " recast" or "", hot.total, hot.duration, hot.ticks, hot.perTick, hot.interval,
+        bloomed > 0 and string.format(", then a bloom of %d", bloomed) or "",
         hot.frontLoaded and string.format(" (front-loaded: first %.1f, last %.1f)", hot.perTick * tracking.tickWeight(hot, 1),
             hot.perTick * tracking.tickWeight(hot, hot.ticks)) or "",
         sent.guidKey and "" or " (kept by name)"))
@@ -658,7 +735,8 @@ end
 
 local events = CreateFrame("Frame")
 for _, event in ipairs({ "UNIT_AURA", "PLAYER_REGEN_ENABLED", "PLAYER_ENTERING_WORLD", "PLAYER_TARGET_CHANGED",
-    "UNIT_SPELLCAST_CHANNEL_STOP", "PLAYER_TOTEM_UPDATE", "UNIT_PET" }) do
+    "UNIT_SPELLCAST_CHANNEL_STOP", "PLAYER_TOTEM_UPDATE", "UNIT_PET", "UNIT_STATS", "SPELLS_CHANGED",
+    "PLAYER_TALENT_UPDATE", "CHARACTER_POINTS_CHANGED", "TRAIT_CONFIG_UPDATED" }) do
     pcall(events.RegisterEvent, events, event)
 end
 events:SetScript("OnEvent", function(_, event, unit, ...)
@@ -668,6 +746,11 @@ events:SetScript("OnEvent", function(_, event, unit, ...)
             if unit == "player" then tracking.onChannelStop(args[2]) end
         elseif event == "PLAYER_TOTEM_UPDATE" then
             tracking.onTotemUpdate()
+        elseif event == "UNIT_STATS" then
+            if unit == "player" then tracking.updateBloom() end
+        elseif event == "SPELLS_CHANGED" or event == "PLAYER_TALENT_UPDATE" or event == "CHARACTER_POINTS_CHANGED"
+            or event == "TRAIT_CONFIG_UPDATED" then
+            tracking.updateBloom()
         elseif event == "UNIT_PET" then
             if unit == "player" and plainCall(UnitExists, "pet") then tracking.checkUnit("pet") end
         elseif event == "UNIT_AURA" then
@@ -675,6 +758,7 @@ events:SetScript("OnEvent", function(_, event, unit, ...)
         elseif event == "PLAYER_TARGET_CHANGED" then
             if plainCall(UnitExists, "target") then tracking.checkUnit("target") end
         else
+            tracking.updateBloom()
             tracking.checkUnit("player")
             tracking.housekeep()
         end

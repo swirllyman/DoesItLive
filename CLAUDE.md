@@ -14,7 +14,11 @@ The plan (feasibility, display geometry, tracking, how it stays out of DoesItDie
 
 ## Status
 
-The bars follow your HoTs (Rejuvenation, Regrowth, Renew, Riptide), with an options window (`/dil`). Verified
+The bars follow your HoTs (Rejuvenation, Regrowth, Renew, Riptide), with an options window (`/dil`). The Bloom
+talent (Forever, Restoration, 1 rank: Rejuvenation and Regrowth heal for 100% of your Spirit when they run their full
+duration, 50% when dispelled) adds Spirit to each one's remaining heal until it ends (`tracking.updateBloom`: talent
+from `GetTalentInfo`, else `IsPlayerSpell` on the spell found by name; Spirit from `UnitStat` out of combat, cached for
+combat; `BLOOM` log line). Unverified in-game: the talent lookup and that the bloom heals exactly your Spirit. Verified
 in-game: the bars on the player frame, friendly target frame and personal resource display, and the tracking (Joe,
 2026-11-22: "looks like it's working"). **Not** yet verified in-game: friendly nameplates (name-only plates have no
 bar to draw on: `nameplateShowOnlyNameForFriendlyPlayerUnits`), the options window and the bar options (fill

@@ -1,5 +1,11 @@
 # DoesItLive
 
+## v0.1.1
+
+- **Bloom:** with the Restoration talent Bloom, your Rejuvenation and Regrowth count the heal they give as they run
+  out (your Spirit) in the healing still to come. Spirit is read out of combat; Swiftmend or a recast ends a HoT without
+  it. Turn it off under What to track > Bloom talent.
+
 ## v0.1.0
 
 The first release of DoesItLive, the sister addon of DoesItDie: it shows how much healing your HoTs still have to do,
