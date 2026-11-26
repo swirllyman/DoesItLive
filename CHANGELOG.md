@@ -1,6 +1,6 @@
 # DoesItLive
 
-## Unreleased
+## v0.1.1
 
 - **Bloom:** with the Restoration talent Bloom, your Rejuvenation and Regrowth count the heal they give as they run
   out (your Spirit) in the healing still to come. Spirit is read out of combat; Swiftmend or a recast ends a HoT without
