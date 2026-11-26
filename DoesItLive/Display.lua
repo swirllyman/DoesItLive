@@ -1,5 +1,5 @@
 -- DoesItLive display: the heal bar on the player frame, the personal resource display (the bars under the character)
--- and the target frame while the target is friendly, and on friendly nameplates (/dil plates). It shows what the
+-- and the target and focus frames while that unit is friendly, and on friendly nameplates (/dil plates). It shows what the
 -- HoTs tracked in Tracking.lua still have to heal; /dil bar <amount> shows a fixed amount instead.
 --
 -- Everything stays inside the health bar. Lua never compares health (secret, even out of combat); the widgets do:
@@ -36,8 +36,8 @@ local previews = {} -- the options window's mock bars
 local lookVersion = 0 -- bumped when a setting changes, so each widget re-applies its look
 
 -- Which setting turns each place on.
-local PLACE_SETTING = { player = "showPlayer", personal = "showPersonal", target = "showTarget", plate = "showPlates",
-    pet = "showPet", raid = "showRaid" }
+local PLACE_SETTING = { player = "showPlayer", personal = "showPersonal", target = "showTarget", focus = "showFocus",
+    plate = "showPlates", pet = "showPet", raid = "showRaid" }
 
 local spellShown = ns.spellShown
 
@@ -92,7 +92,7 @@ end
 -- EllesmereUI draws its own unit frames, globals named like these, with the bar at .Health (target and focus
 -- verified by DoesItDie's users; player and pet follow the same naming, unverified: logAddonFrames shows what's there).
 local ELLESMERE_FRAMES = { player = "EllesmereUIUnitFrames_Player", target = "EllesmereUIUnitFrames_Target",
-    pet = "EllesmereUIUnitFrames_Pet" }
+    focus = "EllesmereUIUnitFrames_Focus", pet = "EllesmereUIUnitFrames_Pet" }
 
 local function ellesmereFinder(kind)
     return function()
@@ -132,6 +132,13 @@ local function findBlizzardTargetBar()
     return findInContent(content and content.TargetFrameContentMain, TargetFrameHealthBar, "TargetFrame", TargetFrame)
 end
 
+-- Blizzard's focus frame is built from the target frame's template, so its bar sits at the same paths (DoesItDie's
+-- Focus.lua, verified in-game there).
+local function findBlizzardFocusBar()
+    local content = FocusFrame and FocusFrame.TargetFrameContent
+    return findInContent(content and content.TargetFrameContentMain, FocusFrameHealthBar, "FocusFrame", FocusFrame)
+end
+
 local function findPlayerBar()
     return firstFound(customFinder("customPlayerBar"), ellesmereFinder("player"),
         betterBlizzFinder(function() return PlayerFrame end, function() return (findBlizzardPlayerBar()) end),
@@ -142,6 +149,12 @@ local function findTargetBar()
     return firstFound(customFinder("customTargetBar"), ellesmereFinder("target"),
         betterBlizzFinder(function() return TargetFrame end, function() return (findBlizzardTargetBar()) end),
         findBlizzardTargetBar)
+end
+
+local function findFocusBar()
+    return firstFound(customFinder("customFocusBar"), ellesmereFinder("focus"),
+        betterBlizzFinder(function() return FocusFrame end, function() return (findBlizzardFocusBar()) end),
+        findBlizzardFocusBar)
 end
 
 local function findBlizzardPetBar()
@@ -361,6 +374,7 @@ local widgets = {
     createWidget("player", "player", findPlayerBar),
     createWidget("personal", "player", findPersonalBar),
     createWidget("target", "target", findTargetBar),
+    createWidget("focus", "focus", findFocusBar),
     createWidget("pet", "pet", findPetBar),
 }
 
@@ -1252,15 +1266,18 @@ function display.logAddonFrames()
     out("ADDON EllesmereUI frames: " .. (#found > 0 and table.concat(found, ", ") or "none found"))
 end
 
-function display.onTargetChanged()
+local function unitChanged(unit)
     if nothingToShow() then return end
     for _, w in ipairs(widgets) do
-        if w.unit == "target" then
+        if w.unit == unit then
             checkHost(w)
             updateWidget(w)
         end
     end
 end
+
+function display.onTargetChanged() unitChanged("target") end
+function display.onFocusChanged() unitChanged("focus") end
 
 -- Something changed (a HoT came or went): update now instead of at the next tenth of a second.
 function display.refresh()
@@ -1348,7 +1365,7 @@ function display.setTestBar(amount)
     for unit in pairs(failedPlates) do failedPlates[unit] = nil end
     display.refresh()
     if amount then
-        out(string.format("Test heal bar: a fixed %d healing on your player frame, personal resource bar, friendly target and friendly nameplates (not your HoTs). Teal = will heal, pale blue strip = overheal, plus = tops off. /dil bar to go back to your HoTs.", amount), true)
+        out(string.format("Test heal bar: a fixed %d healing on your player frame, personal resource bar, friendly target and focus, and friendly nameplates (not your HoTs). Teal = will heal, pale blue strip = overheal, plus = tops off. /dil bar to go back to your HoTs.", amount), true)
     else
         out("Test heal bar off: showing your HoTs.", true)
     end

@@ -78,12 +78,13 @@ function GetBuildInfo() return "1.60.1", "12345", "", 16001 end
 function UnitClass() return "Druid", "DRUID" end
 function UnitLevel() return 60 end
 function UnitAffectingCombat() return inCombat end
-function UnitExists(u) return u == "player" or u == "target" or u == "party1" or (plates and plates[u] ~= nil) or u == "nameplate3" end
+function UnitExists(u) return u == "player" or u == "target" or u == "party1" or (plates and plates[u] ~= nil) or u == "nameplate3" or u == "focus" end
 function UnitIsUnit(a, b) return a == b end
-friendlyTarget = false
+friendlyTarget, friendlyFocus = false, false
 function UnitCanAssist(_, u)
     if friendlyTarget == "secret" then return SECRET end
     if u == "nameplate2" then return false end
+    if u == "focus" then return friendlyFocus end
     return u ~= "target" or friendlyTarget
 end
 function UnitCanAttack(_, u) return u == "target" end
@@ -147,6 +148,9 @@ end
 TargetFrame = layered(SECRET, SECRET, { layered("LOW", 5000),
     setmetatable({}, { __index = function() error("forbidden frame") end }), layered("MEDIUM", 1001) })
 for k, v in pairs({ TargetFrameContent = { TargetFrameContentMain = { HealthBarsContainer = { HealthBar = CreateFrame("StatusBar") } } } }) do TargetFrame[k] = v end
+-- The focus frame: built from the target frame's template.
+FocusFrame = layered("LOW", 10, { layered("MEDIUM", 1001) })
+FocusFrame.TargetFrameContent = { TargetFrameContentMain = { HealthBarsContainer = { HealthBar = CreateFrame("StatusBar") } } }
 PersonalResourceDisplayFrame = { HealthBarsContainer = { healthBar = CreateFrame("StatusBar") } }
 for k, v in pairs(layered("LOW", 20)) do PlayerFrame[k] = v end
 for k, v in pairs(layered("LOW", 40)) do PersonalResourceDisplayFrame[k] = v end
@@ -229,7 +233,7 @@ def main():
         end
     end
     for level, count in pairs(seen) do
-        assert(count == 4, "level " .. level .. " used " .. count .. " times") levels = levels + 1 -- once per unit frame widget
+        assert(count == 5, "level " .. level .. " used " .. count .. " times") levels = levels + 1 -- once per unit frame widget
     end
     assert(levels == 11, "layers: " .. levels)
     friendlyTarget = true fireEvent("PLAYER_TARGET_CHANGED") assert(targetShown() == true, "hidden on a friend")
@@ -237,6 +241,20 @@ def main():
     friendlyTarget = true tick(0.2) assert(targetShown() == true, "not shown again")
     friendlyTarget = false fireEvent("PLAYER_TARGET_CHANGED") assert(targetShown() == false, "still on an enemy")
     cmd("bar") assert(targetShown() == false, "not hidden by /dil bar")
+    -- The focus frame's bar follows whether the focus is friendly, and its setting.
+    local focusArea = FocusFrame.TargetFrameContent.TargetFrameContentMain.HealthBarsContainer
+    local function focusShown()
+        for _, f in ipairs(allFrames) do
+            if f.over == focusArea and f._parent == UIParent then return f.shown end
+        end
+        error("no focus widget")
+    end
+    cmd("bar 300") assert(focusShown() == false, "shown on an enemy focus")
+    friendlyFocus = true fireEvent("PLAYER_FOCUS_CHANGED") assert(focusShown() == true, "hidden on a friendly focus")
+    DoesItLiveDB.showFocus = false tick(0.2) assert(focusShown() == false, "shown with the focus frame turned off")
+    DoesItLiveDB.showFocus = true tick(0.2) assert(focusShown() == true, "not shown again on the focus")
+    friendlyFocus = false fireEvent("PLAYER_FOCUS_CHANGED") assert(focusShown() == false, "still on an enemy focus")
+    cmd("bar")
     cmd("bar 300") tick(0.2) cmd("bar")
     -- Friendly nameplates: 1 friendly, 2 enemy, 3 hidden by the client, 4 forbidden, 5 without a bar.
     local function root()

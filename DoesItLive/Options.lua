@@ -533,6 +533,7 @@ local function buildTabs()
     show:checkbox("showPersonal", "Bars under your character", { tooltip = "The personal resource display. Turn it "
         .. "on in Options > Combat if you don't see it." })
     show:checkbox("showTarget", "Friendly target", { tooltip = "Your target's frame, when you can assist it." })
+    show:checkbox("showFocus", "Friendly focus", { tooltip = "Your focus's frame, when you can assist it." })
     show:checkbox("showPlates", "Friendly nameplates", { tooltip = "Nameplates of friendly players and NPCs. "
         .. "Friendly players need their health bars on: untick \"show only name\" under friendly players in "
         .. "Options > Nameplates. In dungeons the game may keep friendly nameplates from addons." })
@@ -673,6 +674,8 @@ local function buildTabs()
     advanced:info("  in use", function() return ns.display.status("player") end)
     advanced:frame("customTargetBar", "Target health bar", { tooltip = "For a unit frame addon's target frame." .. PATH_TIP })
     advanced:info("  in use", function() return ns.display.status("target") end)
+    advanced:frame("customFocusBar", "Focus health bar", { tooltip = "For a unit frame addon's focus frame." .. PATH_TIP })
+    advanced:info("  in use", function() return ns.display.status("focus") end)
     advanced:frame("customPetBar", "Pet health bar", { tooltip = "For a unit frame addon's pet frame." .. PATH_TIP })
     advanced:info("  in use", function() return ns.display.status("pet") end)
     advanced:frame("customPlateBar", "Nameplate health bar", { noPick = true, tooltip = "Most nameplate addons' bars "
