@@ -398,7 +398,7 @@ for _, event in ipairs({
     "ADDON_LOADED", "PLAYER_LOGOUT", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED",
     "ADDON_ACTION_BLOCKED", "ADDON_ACTION_FORBIDDEN",
     "UNIT_COMBAT", "UNIT_HEALTH", "UNIT_AURA", "UNIT_SPELLCAST_SENT", "UNIT_SPELLCAST_SUCCEEDED",
-    "CHAT_MSG_ADDON", "PLAYER_TARGET_CHANGED", "NAME_PLATE_UNIT_ADDED", "NAME_PLATE_UNIT_REMOVED", "GROUP_ROSTER_UPDATE",
+    "CHAT_MSG_ADDON", "PLAYER_TARGET_CHANGED", "PLAYER_FOCUS_CHANGED", "NAME_PLATE_UNIT_ADDED", "NAME_PLATE_UNIT_REMOVED", "GROUP_ROSTER_UPDATE",
 }) do
     local ok, err = pcall(f.RegisterEvent, f, event)
     registrations[#registrations + 1] = event .. "=" .. (ok and "ok" or ("ERROR " .. tostring(err)))
@@ -470,6 +470,9 @@ f:SetScript("OnEvent", function(self, event, ...)
 
     elseif event == "PLAYER_TARGET_CHANGED" then
         ns.display.onTargetChanged()
+
+    elseif event == "PLAYER_FOCUS_CHANGED" then
+        ns.display.onFocusChanged()
 
     elseif event == "GROUP_ROSTER_UPDATE" then
         ns.display.onRosterChanged()

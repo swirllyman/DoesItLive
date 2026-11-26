@@ -8,7 +8,7 @@ local _, ns = ...
 
 ns.DEFAULTS = {
     -- Where
-    showPlayer = true, showPersonal = true, showTarget = true, showPlates = true, showPet = true, showRaid = true,
+    showPlayer = true, showPersonal = true, showTarget = true, showFocus = true, showPlates = true, showPet = true, showRaid = true,
     -- Which HoTs
     -- (catX and spellX for every category and spell below are added after this table)
     -- Heal fill
@@ -27,7 +27,7 @@ ns.DEFAULTS = {
     -- Text
     showText = false, textPosition = "left", textSize = 10, textColor = "white",
     -- Unit frame addons the addon doesn't know: a frame path (Frames.lua), or keys from the nameplate
-    customPlayerBar = "", customTargetBar = "", customPetBar = "", customPlateBar = "",
+    customPlayerBar = "", customTargetBar = "", customFocusBar = "", customPetBar = "", customPlateBar = "",
 }
 
 -- What can be tracked, in groups the options show (Tracking.lua has how each one heals). The last group catches

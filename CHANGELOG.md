@@ -1,5 +1,11 @@
 # DoesItLive
 
+## Unreleased
+
+- **Focus frame:** the heal bar, overheal strip and plus now show on your focus's frame too, when you can assist it
+  (Blizzard's, EllesmereUI's or BetterBlizzFrames' focus frame, or another addon's through Advanced > Focus health
+  bar). Turn it off under Show on > Friendly focus.
+
 ## v0.1.0
 
 The first release of DoesItLive, the sister addon of DoesItDie: it shows how much healing your HoTs still have to do,

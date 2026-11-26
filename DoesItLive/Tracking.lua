@@ -657,7 +657,7 @@ function tracking.onTotemUpdate()
 end
 
 local events = CreateFrame("Frame")
-for _, event in ipairs({ "UNIT_AURA", "PLAYER_REGEN_ENABLED", "PLAYER_ENTERING_WORLD", "PLAYER_TARGET_CHANGED",
+for _, event in ipairs({ "UNIT_AURA", "PLAYER_REGEN_ENABLED", "PLAYER_ENTERING_WORLD", "PLAYER_TARGET_CHANGED", "PLAYER_FOCUS_CHANGED",
     "UNIT_SPELLCAST_CHANNEL_STOP", "PLAYER_TOTEM_UPDATE", "UNIT_PET" }) do
     pcall(events.RegisterEvent, events, event)
 end
@@ -674,6 +674,8 @@ events:SetScript("OnEvent", function(_, event, unit, ...)
             if type(unit) == "string" and not isSecret(unit) and not ns.inCombat() then tracking.checkUnit(unit) end
         elseif event == "PLAYER_TARGET_CHANGED" then
             if plainCall(UnitExists, "target") then tracking.checkUnit("target") end
+        elseif event == "PLAYER_FOCUS_CHANGED" then
+            if plainCall(UnitExists, "focus") then tracking.checkUnit("focus") end
         else
             tracking.checkUnit("player")
             tracking.housekeep()
