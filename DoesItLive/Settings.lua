@@ -11,6 +11,7 @@ ns.DEFAULTS = {
     showPlayer = true, showPersonal = true, showTarget = true, showPlates = true, showPet = true, showRaid = true,
     -- Which HoTs
     -- (catX and spellX for every category and spell below are added after this table)
+    countBloom = true, -- the Bloom talent's heal as Rejuvenation and Regrowth run out (when you have it)
     -- Heal fill
     healColor = "teal", healOpacity = 25, fillTexture = "flat",
     hotColors = "bySpell", segmentDividers = true,

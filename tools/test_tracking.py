@@ -397,6 +397,57 @@ SlashCmdList.DOESITLIVE("bar 800") expect("override", playerRoot.shown, true)
 SlashCmdList.DOESITLIVE("bar") expect("override off", playerRoot.shown, false)
 cast(774, "Joe Gg") SlashCmdList.DOESITLIVE("hots")
 assert(logged("Rejuvenation on Joe Gg: 214 left (4 of 4 ticks of 53.5)"), "/dil hots")
+clear()
+
+-- Bloom (Forever's Restoration talent): Rejuvenation and Regrowth heal for your Spirit as they run out.
+spirit = 120
+function UnitStat(unit, index)
+    if unit ~= "player" or index ~= 5 then return 0, 0 end
+    if inCombat then return SECRET, SECRET end
+    return 100, spirit
+end
+talentRanks = { Bloom = 0 }
+function GetNumTalentTabs() return 3 end
+function GetNumTalents(tab) return tab == 3 and 2 or 0 end
+function GetTalentInfo(tab, index)
+    local name = ({ "Gift of Nature", "Bloom" })[index]
+    return name, 0, 3, index, talentRanks[name] or 0, 1
+end
+fireEvent("CHARACTER_POINTS_CHANGED")
+cast(774, "Joe Gg") expect("no talent, no bloom", left("player"), 214)
+assert(logged("BLOOM talent no (talent tree, rank 0)"), "missing talent not logged")
+clear()
+talentRanks.Bloom = 1
+fireEvent("CHARACTER_POINTS_CHANGED")
+assert(logged("BLOOM talent yes (talent tree, rank 1), Spirit 120"), "talent not logged")
+inCombat = true
+spirit = 999 fireEvent("UNIT_STATS", "player") -- secret in combat: the last readable Spirit stays
+cast(774, "Joe Gg") expect("Rejuvenation + bloom", left("player"), 214 + 120)
+assert(logged("then a bloom of 120"), "bloom not in the estimate")
+cast(139, "Joe Gg") expect("Renew doesn't bloom", left("player"), 214 + 120 + 830)
+wait(3.5) expect("bloom stays to the end", left("player"), 161 + 120 + 664)
+wait(9) expect("bloomed with the last tick (Renew has one left)", left("player"), 166)
+cast(8936, "Pal Smith") expect("Regrowth + bloom", left("party1"), 300 + 120)
+cast(18562, "Pal Smith") expect("Swiftmend: no bloom", left("party1"), 0)
+cast(774, "Pal Smith") NS.db().countBloom = false expect("option off", left("party1"), 214)
+NS.db().countBloom = true expect("option on", left("party1"), 334)
+clear()
+-- Out of combat a new Spirit is read.
+spirit = 150 fireEvent("UNIT_STATS", "player")
+cast(774, "Joe Gg") expect("new Spirit", left("player"), 214 + 150)
+clear()
+-- Without Classic's talent functions: the spell by name.
+GetNumTalentTabs, GetNumTalents, GetTalentInfo = nil, nil, nil
+C_Spell.GetSpellInfo = function(name) if name == "Bloom" then return { spellID = 4242 } end end
+known = {}
+function IsPlayerSpell(id) return known[id] == true end
+fireEvent("SPELLS_CHANGED")
+cast(774, "Joe Gg") expect("spell not known", left("player"), 214)
+clear()
+known[4242] = true fireEvent("SPELLS_CHANGED")
+cast(774, "Joe Gg") expect("spell known", left("player"), 364)
+assert(logged("BLOOM talent yes (spell 4242)"), "spell lookup not logged")
+clear()
 for _, line in ipairs(DoesItLiveDB.log) do assert(not line:find("ERROR", 1, true) or line:find("Auras cannot", 1, true), line) end
 """
 

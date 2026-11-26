@@ -566,6 +566,11 @@ local function buildTabs()
             track:checkbox(ns.spellKey("spell", spell), "    " .. spell,
                 { layout = CHECK_LAYOUT, enabledIf = on, tooltip = NOTES[spell] })
         end
+        if category.id == "Others" then
+            track:checkbox("countBloom", "    Bloom talent", { layout = CHECK_LAYOUT, enabledIf = on,
+                tooltip = "Restoration talent: Rejuvenation and Regrowth heal for your Spirit when they run out. Counted "
+                    .. "as their last bit of healing when you have the talent. Your Spirit is read out of combat." })
+        end
     end
     local columnOf = { Others = 1, Self = 1, Pet = 2, Group = 2, Items = 2 }
     local column
